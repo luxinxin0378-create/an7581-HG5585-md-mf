@@ -1,0 +1,9 @@
+#!/bin/sh
+# LuCI 概览页「Temperature」数据源：rpcd 调用 /sbin/tempinfo
+# airoha 内核已启用 CONFIG_AIROHA_THERMAL，thermal_zone0 即 CPU 温度
+T="/sys/class/thermal/thermal_zone0/temp"
+if [ -r "$T" ]; then
+	awk '{printf "CPU: %.1f°C", $1 / 1000}' "$T"
+else
+	printf '%s' "N/A"
+fi

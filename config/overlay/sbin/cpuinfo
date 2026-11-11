@@ -1,0 +1,38 @@
+#!/bin/sh
+# LuCI 概览页「Architecture」数据源：rpcd 调用 /sbin/cpuinfo
+# 输出形如：ARMv8 Processor rev 4 x 4 (1300MHz, 46.2°C)
+CPUINFO="/proc/cpuinfo"
+CPUFREQ="/sys/devices/system/cpu/cpufreq"
+THERMAL="/sys/class/thermal/thermal_zone0/temp"
+
+arch="$(awk -F': ' '/^model name/ {print $2; exit}' "$CPUINFO")"
+[ -n "$arch" ] || arch="$(awk -F': ' '/^Processor/ {print $2; exit}' "$CPUINFO")"
+[ -n "$arch" ] || arch="$(awk -F': ' '/^Hardware/ {print $2; exit}' "$CPUINFO")"
+[ -n "$arch" ] || arch="$(uname -m)"
+
+cores="$(grep -c '^processor' "$CPUINFO")"
+[ "$cores" -ge 1 ] 2>/dev/null || cores=1
+
+freq=""
+for f in "$CPUFREQ/policy0/cpuinfo_cur_freq" "$CPUFREQ/policy0/scaling_cur_freq" \
+         "$CPUFREQ/cpu0/cpuinfo_cur_freq"; do
+	if [ -r "$f" ]; then
+		freq="$(awk '{printf "%.0fMHz", $1 / 1000}' "$f")"
+		break
+	fi
+done
+
+temp=""
+if [ -r "$THERMAL" ]; then
+	temp="$(awk '{printf "%.1f°C", $1 / 1000}' "$THERMAL")"
+fi
+
+if [ -n "$freq" ] && [ -n "$temp" ]; then
+	printf '%s x %s (%s, %s)' "$arch" "$cores" "$freq" "$temp"
+elif [ -n "$freq" ]; then
+	printf '%s x %s (%s)' "$arch" "$cores" "$freq"
+elif [ -n "$temp" ]; then
+	printf '%s x %s (%s)' "$arch" "$cores" "$temp"
+else
+	printf '%s x %s' "$arch" "$cores"
+fi

@@ -56,6 +56,13 @@ group "注入机型定制 ($MODEL)"
 OVL="$SRC/files"
 mkdir -p "$OVL/etc/uci-defaults" "$OVL/etc/openclash/core"
 
+# 3.4 概览页频率/温度显示：LuCI 状态页通过 /sbin/cpuinfo、/sbin/tempinfo 读数。
+#     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
+#     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
+mkdir -p "$OVL/sbin"
+install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"  "$OVL/sbin/cpuinfo"
+install -m 0755 "$REPO/config/overlay/sbin/tempinfo" "$OVL/sbin/tempinfo"
+
 # 3.1 登录密码 root
 ROOT_HASH="$(openssl passwd -1 -salt airoha root 2>/dev/null || true)"
 [ -n "$ROOT_HASH" ] || ROOT_HASH='$1$airoha$lzq0xSV6pJiFfzc/JwIoc0'
@@ -197,6 +204,26 @@ KEYS="$(grep -E '^CONFIG_PACKAGE_(u-boot-|trusted-firmware-a-|arm-gnu-toolchain)
 for k in $KEYS; do
   sed -i "s|^${k}=y|# ${k} is not set|" .config
 done
+
+# ---------------------------------------------------------------
+# an7583 专属修复：XG-040G-MF(UBI) 设备除 sysupgrade.itb 外还定义了
+#   ARTIFACTS := bl31-uboot.fip preloader.bin
+# 这两个 ARTIFACT 是「首次烧录用」的独立 bootloader，生成时要调用 host
+# 工具 fiptool（由 arm-trusted-firmware-tools/host 提供），其输入
+# bl2.bin / bl31.lzma / u-boot.lzma 又由上面刚禁用的 ATF / u-boot 包产出。
+# 于是云端上一轮报 `fiptool: No such file or directory` → target/linux
+# 构建失败（Error 127）。它们不属于 sysupgrade 固件，直接移除 ARTIFACT
+# 定义，只保留 IMAGES := sysupgrade.itb，与 an7581 三机型处理一致。
+# ---------------------------------------------------------------
+if [ "$SUBTARGET" = "an7583" ]; then
+  group "移除 an7583 独立 bootloader ARTIFACT 规则（修复 fiptool 缺失）"
+  MK="target/linux/airoha/image/an7583.mk"
+  sed -i -E '/^[[:space:]]*ARTIFACT/d' "$MK"
+  echo "剩余 ARTIFACT 定义行数: $(grep -cE '^[[:space:]]*ARTIFACT' "$MK" || true)"
+  echo "--- mf-ubi 设备块（确认只产 sysupgrade.itb）---"
+  sed -n '/define Device\/nokia_xg-040g-mf-ubi/,/^endef/p' "$MK"
+  endg
+fi
 
 # 严格校验：用户要求的包必须全部入选
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \

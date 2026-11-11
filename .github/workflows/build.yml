@@ -79,7 +79,8 @@ jobs:
   publish:
     name: 汇总发布到 Release
     needs: build
-    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    # 只有两个机型都编译成功才发布，避免失败时生成空 Release
+    if: ${{ needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: 下载两个机型的固件

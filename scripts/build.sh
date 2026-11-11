@@ -32,7 +32,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 endg
 
-group "收集产物"
+group "收集产物并按规则重命名"
 OUT="$REPO/output/$MODEL"
 mkdir -p "$OUT"
 find bin/targets/airoha/an7581 -maxdepth 1 -type f \
@@ -43,16 +43,34 @@ if [ -z "$(ls -A "$OUT")" ]; then
   find bin/targets/airoha/an7581 -maxdepth 1 -type f \
     -name "*sysupgrade*" -exec cp -v {} "$OUT/" \;
 fi
-ls -lh "$OUT"
 if [ -z "$(ls -A "$OUT")" ]; then
   echo "::error::未找到 sysupgrade 固件"
   exit 1
 fi
-# 附上构建信息，便于追溯
+
+# 命名规则：arioha-<机型>-R<NN 递加>-B26-<月>-<日>
+# R 号来自 config/REVISION（每轮发版 +1），日期按北京时间
+source "$REPO/scripts/name-firmware.sh"
+FWNAME="$(firmware_basename "$MODEL" "$REPO/config/REVISION")"
+MAIN="$(find "$OUT" -maxdepth 1 -type f -name '*sysupgrade*.itb' -print -quit)"
+[ -n "$MAIN" ] || MAIN="$(find "$OUT" -maxdepth 1 -type f -name '*sysupgrade*' -print -quit)"
+if [ -z "$MAIN" ]; then
+  echo "::error::未定位到 sysupgrade 主固件"
+  exit 1
+fi
+mv -v "$MAIN" "$OUT/${FWNAME}.itb"
+echo "固件名: ${FWNAME}.itb"
+
 {
-  echo "机型:   $MODEL"
-  echo "Profile: $PROFILE"
-  echo "源码:   $(git -C "$SRC" log -1 --format='pbs05/ponwrt %h %cd' --date=short 2>/dev/null || echo pbs05/ponwrt)"
-  echo "构建:   GitHub Actions run ${GITHUB_RUN_NUMBER:-local}"
-} > "$OUT/${MODEL}-BUILD-INFO.txt"
+  echo "固件名:   ${FWNAME}.itb"
+  echo "机型:     $MODEL"
+  echo "Profile:  $PROFILE"
+  echo "原始产物: $(basename "$MAIN")"
+  echo "源码:     $(git -C "$SRC" log -1 --format='pbs05/ponwrt %h %cd' --date=short 2>/dev/null || echo pbs05/ponwrt)"
+  echo "构建:     GitHub Actions run ${GITHUB_RUN_NUMBER:-local}"
+} > "$OUT/${FWNAME}-BUILD-INFO.txt"
+# 只保留统一命名后的固件与构建信息，避免旧名产物混进 Release
+find "$OUT" -maxdepth 1 -type f \
+  ! -name "${FWNAME}.itb" ! -name "${FWNAME}-BUILD-INFO.txt" -delete
+ls -lh "$OUT"
 endg

@@ -55,6 +55,13 @@ group "注入机型定制 ($MODEL)"
 OVL="$SRC/files"
 mkdir -p "$OVL/etc/uci-defaults" "$OVL/etc/openclash/core"
 
+# 3.4 概览页频率/温度显示：LuCI 状态页通过 /sbin/cpuinfo、/sbin/tempinfo 读数。
+#     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
+#     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
+mkdir -p "$OVL/sbin"
+install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"  "$OVL/sbin/cpuinfo"
+install -m 0755 "$REPO/config/overlay/sbin/tempinfo" "$OVL/sbin/tempinfo"
+
 # 3.1 登录密码 root（MD5-crypt，失败时用等价的固定 hash 兜底）
 ROOT_HASH="$(openssl passwd -1 -salt airoha root 2>/dev/null || true)"
 [ -n "$ROOT_HASH" ] || ROOT_HASH='$1$airoha$lzq0xSV6pJiFfzc/JwIoc0'
@@ -78,13 +85,17 @@ UCIBATCH
 exit 0
 LANIP
 
-# 3.3 WiFi：仅 hg5585f-ct，SSID 以机型命名，密码八个 8
-if [ "$MODEL" = "hg5585f-ct" ]; then
+# 3.3 WiFi：hg5585f 系列，SSID 以机型命名(HG5585F-CT / HG5585F-CU ...)，密码八个 8
+#     不是 hg5585f 的机型(如 xg-040g 系列无 WiFi)则跳过
+case "$MODEL" in
+  hg5585f-*)
+    SSID="$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]')"
 cat > "$OVL/etc/uci-defaults/99-wifi" <<'WIFI'
 #!/bin/sh
+SSID='__SSID__'
 [ -s /etc/config/wireless ] || wifi config >/dev/null 2>&1
 for s in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface/\1/p'); do
-  uci -q set "wireless.$s.ssid=HG5585F-CT"
+  uci -q set "wireless.$s.ssid=$SSID"
   uci -q set "wireless.$s.encryption=psk2"
   uci -q set "wireless.$s.key=88888888"
   uci -q delete "wireless.$s.disabled"
@@ -98,7 +109,7 @@ config wifi-iface 'default_radio0'
   option device 'radio0'
   option network 'lan'
   option mode 'ap'
-  option ssid 'HG5585F-CT'
+  option ssid '__SSID__'
   option encryption 'psk2'
   option key '88888888'
 UCIWIFI
@@ -106,7 +117,9 @@ fi
 uci -q commit wireless
 exit 0
 WIFI
-fi
+    sed -i "s/__SSID__/${SSID}/g" "$OVL/etc/uci-defaults/99-wifi"
+    ;;
+esac
 chmod +x "$OVL/etc/uci-defaults/"*
 endg
 
