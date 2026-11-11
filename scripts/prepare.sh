@@ -243,27 +243,11 @@ for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-d
 done
 # QFirehose is mandatory for HG5585F CT only; fail early if feeds/defconfig drop it.
 if [[ "$MODEL" == "hg5585f-ct" ]]; then
-  grep -q '^CONFIG_PACKAGE_qmodem_INCLUDE_ADD_QFIREHOSE_SUPPORT=y
-if ! grep -q "^CONFIG_LUCI_LANG_zh_Hans=y$" .config; then
-  echo "::error::缺少 CONFIG_LUCI_LANG_zh_Hans，中文翻译包不会生效"
-  exit 1
-fi
-echo "关键包校验通过（含中文 / Argon 主题）"
-grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET|PROFILE)' .config
-endg
- .config || {
+  grep -Fq "CONFIG_PACKAGE_qmodem_INCLUDE_ADD_QFIREHOSE_SUPPORT=y" .config || {
     echo "::error::HG5585F CT 缺少 QModem QFirehose 支持开关"
     exit 1
   }
-  grep -q '^CONFIG_PACKAGE_qfirehose=y
-if ! grep -q "^CONFIG_LUCI_LANG_zh_Hans=y$" .config; then
-  echo "::error::缺少 CONFIG_LUCI_LANG_zh_Hans，中文翻译包不会生效"
-  exit 1
-fi
-echo "关键包校验通过（含中文 / Argon 主题）"
-grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET|PROFILE)' .config
-endg
- .config || {
+  grep -Fq "CONFIG_PACKAGE_qfirehose=y" .config || {
     echo "::error::HG5585F CT 缺少 qfirehose 包"
     exit 1
   }
@@ -276,3 +260,4 @@ fi
 echo "关键包校验通过（含中文 / Argon 主题）"
 grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET|PROFILE)' .config
 endg
+
