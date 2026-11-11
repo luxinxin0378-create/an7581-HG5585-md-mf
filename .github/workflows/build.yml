@@ -4,6 +4,10 @@ name: 构建 an7581 双机型固件
 on:
   push:
     branches: [main]
+    # 只有配置/脚本变更才重跑 ct/md；新增独立工作流不会打断正在进行的构建
+    paths:
+      - 'config/**'
+      - 'scripts/**'
   workflow_dispatch:
 
 permissions:
