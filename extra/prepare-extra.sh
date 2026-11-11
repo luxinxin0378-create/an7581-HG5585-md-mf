@@ -121,6 +121,18 @@ WIFI
     sed -i "s/__SSID__/${SSID}/g" "$OVL/etc/uci-defaults/99-wifi"
     ;;
 esac
+# 3.4 默认简体中文 + Argon 主题（uci-defaults 开机首次执行，99- 前缀保证最后覆盖）
+#     dispatcher 读取 luci.main.lang：'zh_cn' 会被转成 'zh-cn' 去加载
+#     /usr/lib/lua/luci/i18n/*.zh-cn.lmo（由 luci-i18n-*-zh-cn 包提供）。
+#     Argon 包自带 30_luci-theme-argon 也会设主题，这里兜底确保生效。
+cat > "$OVL/etc/uci-defaults/99-lang-theme" <<'LANGTHEME'
+#!/bin/sh
+uci -q set luci.main.lang='zh_cn'
+uci -q set luci.themes.Argon='/luci-static/argon'
+uci -q set luci.main.mediaurlbase='/luci-static/argon'
+uci -q commit luci
+exit 0
+LANGTHEME
 chmod +x "$OVL/etc/uci-defaults/"*
 endg
 
@@ -228,11 +240,17 @@ fi
 # 严格校验：用户要求的包必须全部入选
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \
          luci-app-airoha-npu luci-app-qmodem-next qmodem luci-app-openclash \
-         luci-app-passwall luci-app-cpufreq xray-core; do
+         luci-app-passwall luci-app-cpufreq xray-core \
+         luci-theme-argon luci-i18n-base-zh-cn; do
   if ! grep -q "^CONFIG_PACKAGE_${p}=y$" .config; then
     echo "::error::配置缺少 ${p}"
     exit 1
   fi
 done
-echo "关键包校验通过"
+# 语言开关是 HIDDEN 中文包能否被选中的前提，必须存在
+if ! grep -q "^CONFIG_LUCI_LANG_zh_Hans=y$" .config; then
+  echo "::error::缺少 CONFIG_LUCI_LANG_zh_Hans，中文翻译包不会生效"
+  exit 1
+fi
+echo "关键包校验通过（含中文 / Argon 主题）"
 endg
