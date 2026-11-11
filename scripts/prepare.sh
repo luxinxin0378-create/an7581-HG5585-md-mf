@@ -237,7 +237,9 @@ for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-d
          luci-app-passwall luci-app-cpufreq xray-core \
          luci-theme-argon luci-i18n-base-zh-cn \
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
-         kmod-usb-serial-sierrawireless kmod-mtk-t7xx; do
+         kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
+         autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
+         libopenssl-devcrypto; do
   if ! grep -q "^CONFIG_PACKAGE_${p}=y$" .config; then
     echo "::error::配置缺少 ${p}"
     exit 1
