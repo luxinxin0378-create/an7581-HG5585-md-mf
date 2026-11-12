@@ -22,21 +22,15 @@ group "克隆 pbs05/ponwrt"
 git clone --depth 1 https://github.com/pbs05/ponwrt.git "$SRC"
 cd "$SRC"
 
-# 可选：打开内核无线子系统。
-# airoha 的 config-6.18 里是 "# CONFIG_WLAN is not set"，整个 wireless
-# 栈（cfg80211/mac80211/所有 WiFi 驱动）都会被 kconfig 依赖挡掉，
-# 只加 kmod 包不会生效。KERNEL_WLAN=1 时把这些符号补进目标内核配置。
+# 注意：不要改内核 config-6.18 的 CONFIG_WLAN。
+# OpenWrt 的无线栈走 package/kernel/mac80211（backports-7.2 独立源码树），
+# cfg80211 / mac80211 / mt76 / rtw88 / ath9k 全部 out-of-tree 编译，
+# 与 target 内核的 CONFIG_WLAN 无关；官方 ramips 等 target 同样是
+# "# CONFIG_WLAN is not set" 却完整支持 USB 无线网卡。
+# 强行打开 CONFIG_WLAN 会引入整棵 WLAN_VENDOR_* 新符号，syncconfig
+# 在非交互环境下提问失败（ATH5K_PCI (NEW) → Error 1），构建直接中断。
 if [ "${KERNEL_WLAN:-0}" = "1" ]; then
-  for KCFG in target/linux/airoha/*/config-6.18; do
-    [ -f "$KCFG" ] || continue
-    sed -i 's|^# CONFIG_WLAN is not set|CONFIG_WLAN=y|' "$KCFG"
-    for sym in CONFIG_WLAN=y CONFIG_WLAN_VENDOR_MEDIATEK=y \
-               CONFIG_WLAN_VENDOR_REALTEK=y CONFIG_WLAN_VENDOR_ATH=y \
-               CONFIG_RFKILL=y; do
-      grep -q "^${sym%%=*}=" "$KCFG" || echo "$sym" >> "$KCFG"
-    done
-    echo "已开启 WLAN: $KCFG"
-  done
+  echo "KERNEL_WLAN=1 已废弃：无线驱动由 backports 提供，无需改内核配置，跳过"
 fi
 endg
 
