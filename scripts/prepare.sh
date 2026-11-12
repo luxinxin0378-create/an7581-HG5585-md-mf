@@ -9,7 +9,8 @@ MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.33}"
 
 REPO="${GITHUB_WORKSPACE:?缺少 GITHUB_WORKSPACE}"
 SRC="$REPO/ponwrt"
-SEED="$REPO/config/seed.config"
+# 默认用正式版种子；测试构建可用 SEED_FILE 指向另一份 .config 种子
+SEED="${SEED_FILE:-$REPO/config/seed.config}"
 
 group(){ echo "::group::$*"; }
 endg(){ echo "::endgroup::"; }
@@ -20,6 +21,23 @@ endg(){ echo "::endgroup::"; }
 group "克隆 pbs05/ponwrt"
 git clone --depth 1 https://github.com/pbs05/ponwrt.git "$SRC"
 cd "$SRC"
+
+# 可选：打开内核无线子系统。
+# airoha 的 config-6.18 里是 "# CONFIG_WLAN is not set"，整个 wireless
+# 栈（cfg80211/mac80211/所有 WiFi 驱动）都会被 kconfig 依赖挡掉，
+# 只加 kmod 包不会生效。KERNEL_WLAN=1 时把这些符号补进目标内核配置。
+if [ "${KERNEL_WLAN:-0}" = "1" ]; then
+  for KCFG in target/linux/airoha/*/config-6.18; do
+    [ -f "$KCFG" ] || continue
+    sed -i 's|^# CONFIG_WLAN is not set|CONFIG_WLAN=y|' "$KCFG"
+    for sym in CONFIG_WLAN=y CONFIG_WLAN_VENDOR_MEDIATEK=y \
+               CONFIG_WLAN_VENDOR_REALTEK=y CONFIG_WLAN_VENDOR_ATH=y \
+               CONFIG_RFKILL=y; do
+      grep -q "^${sym%%=*}=" "$KCFG" || echo "$sym" >> "$KCFG"
+    done
+    echo "已开启 WLAN: $KCFG"
+  done
+fi
 endg
 
 # ---------------------------------------------------------------
@@ -239,7 +257,7 @@ for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-d
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
-         libopenssl-devcrypto; do
+         libopenssl-devcrypto ${EXTRA_REQUIRED_PKGS:-}; do
   if ! grep -q "^CONFIG_PACKAGE_${p}=y$" .config; then
     echo "::error::配置缺少 ${p}"
     exit 1
