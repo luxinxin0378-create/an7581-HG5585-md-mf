@@ -76,15 +76,21 @@ endg
 # ---------------------------------------------------------------
 group "引入 Vantage 主题"
 VANTAGE_DIR="$SRC/package/luci-theme-vantage"
-if [ ! -f "$VANTAGE_DIR/Makefile" ]; then
+VANTAGE_APP_DIR="$SRC/package/luci-app-vantage"
+if [ ! -f "$VANTAGE_DIR/Makefile" ] || [ ! -f "$VANTAGE_APP_DIR/Makefile" ]; then
   rm -rf /tmp/vantage-src
   git clone --depth 1 https://github.com/anothaDev/luci-theme-vantage.git /tmp/vantage-src
-  mkdir -p "$VANTAGE_DIR"
+  mkdir -p "$VANTAGE_DIR" "$VANTAGE_APP_DIR"
   cp -a /tmp/vantage-src/luci-theme-vantage/. "$VANTAGE_DIR/"
+  cp -a /tmp/vantage-src/luci-app-vantage/.  "$VANTAGE_APP_DIR/"
   rm -rf /tmp/vantage-src
 fi
 grep -q 'LUCI_TITLE:=Vantage theme' "$VANTAGE_DIR/Makefile" || {
   echo "::error::Vantage 主题源码不完整"
+  exit 1
+}
+grep -q 'LUCI_TITLE:=Vantage dashboard' "$VANTAGE_APP_DIR/Makefile" || {
+  echo "::error::Vantage 看板源码不完整"
   exit 1
 }
 endg
@@ -326,7 +332,7 @@ done
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \
          luci-app-airoha-npu luci-app-qmodem-next qmodem luci-app-openclash \
          luci-app-passwall luci-app-cpufreq xray-core \
-         luci-theme-argon luci-theme-vantage luci-i18n-base-zh-cn \
+         luci-theme-argon luci-theme-vantage luci-app-vantage luci-i18n-base-zh-cn \
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
