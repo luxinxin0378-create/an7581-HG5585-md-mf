@@ -143,6 +143,26 @@ exit 0
 RPS
 chmod +x "$OVL/etc/hotplug.d/net/20-rps"
 
+# 3.6 代理转发调优：TCP 缓冲扩容 + conntrack 上限 + dnsmasq 缓存。
+#     OpenClash/Passwall 向代理服务器发起的出站连接是本机 TCP，BBR 配合大缓冲
+#     才能撑满高延迟大带宽链路（200ms RTT x 300Mbps 约 7.5MB 窗口，默认上限不够）；
+#     conntrack 65536 应对 mihomo 大量 UDP/QUIC 短连接，避免表满丢连接。
+cat > "$OVL/etc/sysctl.d/91-proxy-tuning.conf" <<'PROXYTUNE'
+# TCP/UDP 缓冲上限 16MB：tcp_rmem/wmem 第三列是内核自动调优上限
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 131072 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+# conntrack：代理 UDP/QUIC 海量短连接
+net.netfilter.nf_conntrack_max = 65536
+PROXYTUNE
+
+# dnsmasq 缓存扩容：分流场景 DNS 查询量大，加大命中缓存降低首包延迟
+cat > "$OVL/etc/uci-defaults/98-dns-cache" <<'DNSCACHE'
+uci -q set dhcp.@dnsmasq[0].cachesize='2000'
+uci -q commit dhcp
+DNSCACHE
+
 # 3.1 登录密码 root（MD5-crypt，失败时用等价的固定 hash 兜底）
 ROOT_HASH="$(openssl passwd -1 -salt airoha root 2>/dev/null || true)"
 [ -n "$ROOT_HASH" ] || ROOT_HASH='$1$airoha$lzq0xSV6pJiFfzc/JwIoc0'
