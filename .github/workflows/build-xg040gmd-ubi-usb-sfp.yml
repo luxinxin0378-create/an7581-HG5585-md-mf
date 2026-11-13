@@ -48,7 +48,7 @@ jobs:
               exit 0
             fi
             echo "::warning::第 $i 次安装依赖失败，切换镜像源后重试"
-            sudo sed -i -E 's#https?://(azure\\.)?archive\\.ubuntu\\.com#http://archive.ubuntu.com#g; s#https?://security\\.ubuntu\\.com#http://security.ubuntu.com#g' \\
+            sudo sed -i -E 's#https?://(azure\.)?archive\.ubuntu\.com#http://archive.ubuntu.com#g; s#https?://security\.ubuntu\.com#http://security.ubuntu.com#g' \
               /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
             sleep 20
             sudo apt-get update -o Acquire::Retries=8 || true
