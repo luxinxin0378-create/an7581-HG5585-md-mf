@@ -9,6 +9,10 @@ PROFILE="${2:?缺少 target profile}"
 SUBTARGET="${3:?缺少 subtarget (an7581/an7583)}"
 MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.33}"
 
+# WITH_VANTAGE=0：编纯优化版（不拉 Vantage 源码、不选主题/看板，默认回到 Argon）
+WITH_VANTAGE="${WITH_VANTAGE:-1}"
+case "$WITH_VANTAGE" in 0|false|no|off) WITH_VANTAGE=0 ;; *) WITH_VANTAGE=1 ;; esac
+
 REPO="${GITHUB_WORKSPACE:?缺少 GITHUB_WORKSPACE}"
 SRC="$REPO/ponwrt"
 SEED="$REPO/extra/seed-extra.config"
@@ -61,6 +65,7 @@ endg
 #      只取主题：app（仪表盘）还依赖 rpcd-mod-ucode / ucode-mod-nl80211
 #      等一串本固件未选的包，装上也跑不起来。
 # ---------------------------------------------------------------
+if [ "$WITH_VANTAGE" = "1" ]; then
 group "引入 Vantage 主题"
 VANTAGE_DIR="$SRC/package/luci-theme-vantage"
 VANTAGE_APP_DIR="$SRC/package/luci-app-vantage"
@@ -81,6 +86,7 @@ grep -q 'LUCI_TITLE:=Vantage dashboard' "$VANTAGE_APP_DIR/Makefile" || {
   exit 1
 }
 endg
+fi
 
 # ---------------------------------------------------------------
 # 3) 机型定制（OpenWrt files/ overlay，直接编进 rootfs）
@@ -186,17 +192,24 @@ WIFI
     sed -i "s/__SSID__/${SSID}/g" "$OVL/etc/uci-defaults/99-wifi"
     ;;
 esac
-# 3.4 默认简体中文 + Vantage 主题（uci-defaults 开机首次执行，99- 前缀保证最后覆盖）
+# 3.4 默认简体中文 + 默认主题（uci-defaults 开机首次执行，99- 前缀保证最后覆盖）
 #     dispatcher 读取 luci.main.lang：'zh_cn' 会被转成 'zh-cn' 去加载
 #     /usr/lib/lua/luci/i18n/*.zh-cn.lmo（由 luci-i18n-*-zh-cn 包提供）。
-#     主题包自带的 30_luci-theme-* 首次安装会设默认，这里 99- 兜底，
-#     保证刷机后一定是 Vantage；Argon 仍注册，可在 LuCI 里随时切回。
-cat > "$OVL/etc/uci-defaults/99-lang-theme" <<'LANGTHEME'
+#     主题包自带的 30_luci-theme-* 首次安装会设默认，这里 99- 兜底；
+#     WITH_VANTAGE=1 默认 Vantage，=0 默认 Argon（没装 Vantage 时不能指过去）。
+if [ "$WITH_VANTAGE" = "1" ]; then
+  THEME_PATH='/luci-static/vantage'
+  THEME_REGISTER="uci -q set luci.themes.Vantage='/luci-static/vantage'"
+else
+  THEME_PATH='/luci-static/argon'
+  THEME_REGISTER=''
+fi
+cat > "$OVL/etc/uci-defaults/99-lang-theme" <<LANGTHEME
 #!/bin/sh
 uci -q set luci.main.lang='zh_cn'
-uci -q set luci.themes.Vantage='/luci-static/vantage'
 uci -q set luci.themes.Argon='/luci-static/argon'
-uci -q set luci.main.mediaurlbase='/luci-static/vantage'
+${THEME_REGISTER}
+uci -q set luci.main.mediaurlbase='${THEME_PATH}'
 uci -q commit luci
 exit 0
 LANGTHEME
@@ -273,6 +286,11 @@ grep -q 'bool "Use ccache"$' config/Config-devel.in || {
   cat "$SEED"
   echo "CONFIG_TARGET_airoha_${SUBTARGET}_DEVICE_${PROFILE}=y"
 } > .config
+
+# 纯优化版：种子里的 Vantage 行即使存在也要剔掉，避免被 defconfig 选中
+if [ "$WITH_VANTAGE" = "0" ]; then
+  sed -i '/^CONFIG_PACKAGE_luci-theme-vantage=y$/d; /^CONFIG_PACKAGE_luci-app-vantage=y$/d' .config
+fi
 make defconfig
 
 # ccache 是构建加速项，未生效不阻塞出固件，但要显式告警
@@ -320,10 +338,14 @@ if [ "$SUBTARGET" = "an7583" ]; then
 fi
 
 # 严格校验：用户要求的包必须全部入选
+WITH_VANTAGE_PKGS=''
+if [ "$WITH_VANTAGE" = "1" ]; then
+  WITH_VANTAGE_PKGS='luci-theme-vantage luci-app-vantage'
+fi
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \
          luci-app-airoha-npu luci-app-qmodem-next qmodem luci-app-openclash \
          luci-app-passwall luci-app-cpufreq xray-core \
-         luci-theme-argon luci-theme-vantage luci-app-vantage luci-i18n-base-zh-cn \
+         luci-theme-argon ${WITH_VANTAGE_PKGS} luci-i18n-base-zh-cn \
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
