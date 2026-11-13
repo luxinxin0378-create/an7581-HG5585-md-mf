@@ -65,6 +65,29 @@ jobs:
           echo "::error::依赖安装连续 4 次失败"
           exit 1
 
+      - name: 恢复源码包缓存（dl）
+        uses: actions/cache@v4
+        with:
+          path: cache/dl
+          key: dl-v1
+          restore-keys: |
+            dl-
+
+      - name: 恢复编译缓存（ccache）
+        uses: actions/cache@v4
+        with:
+          path: cache/ccache
+          key: ccache-${{ matrix.model }}-${{ hashFiles('extra/**') }}
+          restore-keys: |
+            ccache-${{ matrix.model }}-
+
+      - name: 限制 ccache 体积
+        run: |
+          export CCACHE_DIR="$PWD/cache/ccache"
+          mkdir -p "$CCACHE_DIR"
+          ccache -M 2G >/dev/null 2>&1 || true
+          ccache -s 2>/dev/null | head -10 || true
+
       - name: 准备源码 / feeds / 定制 / 配置
         run: bash extra/prepare-extra.sh "${{ matrix.model }}" "${{ matrix.profile }}" "${{ matrix.subtarget }}"
 

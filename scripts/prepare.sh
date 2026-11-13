@@ -9,7 +9,8 @@ MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.33}"
 
 REPO="${GITHUB_WORKSPACE:?缺少 GITHUB_WORKSPACE}"
 SRC="$REPO/ponwrt"
-SEED="$REPO/config/seed.config"
+# 默认用正式版种子；测试构建可用 SEED_FILE 指向另一份 .config 种子
+SEED="${SEED_FILE:-$REPO/config/seed.config}"
 
 group(){ echo "::group::$*"; }
 endg(){ echo "::endgroup::"; }
@@ -20,6 +21,24 @@ endg(){ echo "::endgroup::"; }
 group "克隆 pbs05/ponwrt"
 git clone --depth 1 https://github.com/pbs05/ponwrt.git "$SRC"
 cd "$SRC"
+
+# 编译缓存：dl（源码包）与 ccache（目标文件）放在源码树之外，
+# 由 GitHub Actions cache 在构建之间复用。软链给 make 用。
+# git clone 出来的目录里没有 dl/.ccache，软链不会覆盖已有内容。
+mkdir -p "$REPO/cache/dl" "$REPO/cache/ccache"
+[ -e "$SRC/dl" ] || ln -s "$REPO/cache/dl" "$SRC/dl"
+[ -e "$SRC/.ccache" ] || ln -s "$REPO/cache/ccache" "$SRC/.ccache"
+
+# 注意：不要改内核 config-6.18 的 CONFIG_WLAN。
+# OpenWrt 的无线栈走 package/kernel/mac80211（backports-7.2 独立源码树），
+# cfg80211 / mac80211 / mt76 / rtw88 / ath9k 全部 out-of-tree 编译，
+# 与 target 内核的 CONFIG_WLAN 无关；官方 ramips 等 target 同样是
+# "# CONFIG_WLAN is not set" 却完整支持 USB 无线网卡。
+# 强行打开 CONFIG_WLAN 会引入整棵 WLAN_VENDOR_* 新符号，syncconfig
+# 在非交互环境下提问失败（ATH5K_PCI (NEW) → Error 1），构建直接中断。
+if [ "${KERNEL_WLAN:-0}" = "1" ]; then
+  echo "KERNEL_WLAN=1 已废弃：无线驱动由 backports 提供，无需改内核配置，跳过"
+fi
 endg
 
 # ---------------------------------------------------------------
@@ -62,6 +81,34 @@ mkdir -p "$OVL/sbin"
 install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"  "$OVL/sbin/cpuinfo"
 install -m 0755 "$REPO/config/overlay/sbin/tempinfo" "$OVL/sbin/tempinfo"
 
+# 3.5 网络转发调优（PPE 未生效，转发全靠 CPU，这里榨多核）
+#     RPS：把网卡 RX 软中断从 CPU0 分散到 CPU1-3；RFS 按 socket 流建哈希。
+#     BBR 由 kmod-tcp-bbr 包自带 sysctl 落地，这里只补 RFS 需要的内核参数。
+mkdir -p "$OVL/etc/sysctl.d" "$OVL/etc/hotplug.d/net"
+cat > "$OVL/etc/sysctl.d/90-rps.conf" <<'SYSCTL'
+# RFS：全局 socket 流哈希表项数（每流 4096 由热插拔脚本分配）
+net.core.rps_sock_flow_entries = 32768
+SYSCTL
+
+cat > "$OVL/etc/hotplug.d/net/20-rps" <<'RPS'
+#!/bin/sh
+# 网卡上线时把 RX 软中断分散到 CPU1-3（4 核取掩码 e，CPU0 留给硬中断）
+[ "$ACTION" = "add" ] || exit 0
+[ -n "$INTERFACE" ] || exit 0
+[ -d "/sys/class/net/$INTERFACE/queues" ] || exit 0
+case "$INTERFACE" in
+  lo|sit*|ip6tnl*|tun*|tap*|wg*|br-*|docker*|veth*) exit 0 ;;
+esac
+for q in /sys/class/net/"$INTERFACE"/queues/rx-*/rps_cpus; do
+  [ -w "$q" ] && echo e > "$q" 2>/dev/null
+done
+for q in /sys/class/net/"$INTERFACE"/queues/rx-*/rps_flow_cnt; do
+  [ -w "$q" ] && echo 4096 > "$q" 2>/dev/null
+done
+exit 0
+RPS
+chmod +x "$OVL/etc/hotplug.d/net/20-rps"
+
 # 3.1 登录密码 root（MD5-crypt，失败时用等价的固定 hash 兜底）
 ROOT_HASH="$(openssl passwd -1 -salt airoha root 2>/dev/null || true)"
 [ -n "$ROOT_HASH" ] || ROOT_HASH='$1$airoha$lzq0xSV6pJiFfzc/JwIoc0'
@@ -94,6 +141,11 @@ cat > "$OVL/etc/uci-defaults/99-wifi" <<'WIFI'
 #!/bin/sh
 SSID='__SSID__'
 [ -s /etc/config/wireless ] || wifi config >/dev/null 2>&1
+# 监管域固定 CN（默认 00/US 会让 5G 高信道不可用、EIRP 受限），并解除 radio 禁用
+for d in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-device/\1/p'); do
+  uci -q set "wireless.$d.country=CN"
+  uci -q set "wireless.$d.disabled=0"
+done
 for s in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface/\1/p'); do
   uci -q set "wireless.$s.ssid=$SSID"
   uci -q set "wireless.$s.encryption=psk2"
@@ -190,6 +242,14 @@ endg
 # 6) .config
 # ---------------------------------------------------------------
 group "生成 .config ($PROFILE)"
+# ccache 选项默认带可见性条件（bool "Use ccache" if DEVEL），DEVEL 未开时
+# kconfig 视为不可见符号，defconfig 会把它重置回默认值 n，种子里写 y 也无效。
+# 这里去掉该条件，让 CONFIG_CCACHE=y 真正生效；不影响其他开发选项。
+sed -i 's/^\([[:space:]]*\)bool "Use ccache" if DEVEL$/\1bool "Use ccache"/' config/Config-devel.in
+grep -q 'bool "Use ccache"$' config/Config-devel.in || {
+  echo "::error::改写 ccache 可见性失败，config/Config-devel.in 结构可能已变"
+  exit 1
+}
 # 单设备模式：设备是 "Target Profile" choice 的成员，符号格式为
 #   CONFIG_TARGET_<board>_<subtarget>_DEVICE_<dev>=y
 # 这里 board/subtarget = airoha/an7581，dev 即 profile。
@@ -209,6 +269,13 @@ CONFIG_PACKAGE_qfirehose=y
 QFIREHOSE
 fi
 make defconfig
+
+# ccache 是构建加速项，未生效不阻塞出固件，但要显式告警
+if grep -q "^CONFIG_CCACHE=y$" .config; then
+  echo "ccache: 已启用"
+else
+  echo "::warning::CONFIG_CCACHE 未生效，本次构建不会写编译缓存"
+fi
 
 # 断言机型设备符号确实被选中，避免编错设备白跑几小时
 if ! grep -q "^CONFIG_TARGET_airoha_an7581_DEVICE_${PROFILE}=y$" .config; then
@@ -239,7 +306,7 @@ for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-d
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
-         libopenssl-devcrypto; do
+         libopenssl-devcrypto kmod-tcp-bbr ${EXTRA_REQUIRED_PKGS:-}; do
   if ! grep -q "^CONFIG_PACKAGE_${p}=y$" .config; then
     echo "::error::配置缺少 ${p}"
     exit 1
