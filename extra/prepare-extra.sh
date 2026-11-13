@@ -55,6 +55,28 @@ cat feeds.conf
 endg
 
 # ---------------------------------------------------------------
+# 2.5) Vantage 主题（第三方，不在 immortalwrt/luci 里）
+#      anothaDev 的仓库同时含 luci-theme-vantage 与 luci-app-vantage，
+#      根目录不是 feed 结构，直接 clone 后把主题目录拷进 package/。
+#      只取主题：app（仪表盘）还依赖 rpcd-mod-ucode / ucode-mod-nl80211
+#      等一串本固件未选的包，装上也跑不起来。
+# ---------------------------------------------------------------
+group "引入 Vantage 主题"
+VANTAGE_DIR="$SRC/package/luci-theme-vantage"
+if [ ! -f "$VANTAGE_DIR/Makefile" ]; then
+  rm -rf /tmp/vantage-src
+  git clone --depth 1 https://github.com/anothaDev/luci-theme-vantage.git /tmp/vantage-src
+  mkdir -p "$VANTAGE_DIR"
+  cp -a /tmp/vantage-src/luci-theme-vantage/. "$VANTAGE_DIR/"
+  rm -rf /tmp/vantage-src
+fi
+grep -q 'LUCI_TITLE:=Vantage theme' "$VANTAGE_DIR/Makefile" || {
+  echo "::error::Vantage 主题源码不完整"
+  exit 1
+}
+endg
+
+# ---------------------------------------------------------------
 # 3) 机型定制（OpenWrt files/ overlay，直接编进 rootfs）
 # ---------------------------------------------------------------
 group "注入机型定制 ($MODEL)"
@@ -158,15 +180,17 @@ WIFI
     sed -i "s/__SSID__/${SSID}/g" "$OVL/etc/uci-defaults/99-wifi"
     ;;
 esac
-# 3.4 默认简体中文 + Argon 主题（uci-defaults 开机首次执行，99- 前缀保证最后覆盖）
+# 3.4 默认简体中文 + Vantage 主题（uci-defaults 开机首次执行，99- 前缀保证最后覆盖）
 #     dispatcher 读取 luci.main.lang：'zh_cn' 会被转成 'zh-cn' 去加载
 #     /usr/lib/lua/luci/i18n/*.zh-cn.lmo（由 luci-i18n-*-zh-cn 包提供）。
-#     Argon 包自带 30_luci-theme-argon 也会设主题，这里兜底确保生效。
+#     主题包自带的 30_luci-theme-* 首次安装会设默认，这里 99- 兜底，
+#     保证刷机后一定是 Vantage；Argon 仍注册，可在 LuCI 里随时切回。
 cat > "$OVL/etc/uci-defaults/99-lang-theme" <<'LANGTHEME'
 #!/bin/sh
 uci -q set luci.main.lang='zh_cn'
+uci -q set luci.themes.Vantage='/luci-static/vantage'
 uci -q set luci.themes.Argon='/luci-static/argon'
-uci -q set luci.main.mediaurlbase='/luci-static/argon'
+uci -q set luci.main.mediaurlbase='/luci-static/vantage'
 uci -q commit luci
 exit 0
 LANGTHEME
@@ -293,7 +317,7 @@ fi
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \
          luci-app-airoha-npu luci-app-qmodem-next qmodem luci-app-openclash \
          luci-app-passwall luci-app-cpufreq xray-core \
-         luci-theme-argon luci-i18n-base-zh-cn \
+         luci-theme-argon luci-theme-vantage luci-i18n-base-zh-cn \
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
@@ -308,5 +332,5 @@ if ! grep -q "^CONFIG_LUCI_LANG_zh_Hans=y$" .config; then
   echo "::error::缺少 CONFIG_LUCI_LANG_zh_Hans，中文翻译包不会生效"
   exit 1
 fi
-echo "关键包校验通过（含中文 / Argon 主题）"
+echo "关键包校验通过（含中文 / Vantage + Argon 主题）"
 endg
