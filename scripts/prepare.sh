@@ -68,22 +68,30 @@ cat feeds.conf
 endg
 
 # ---------------------------------------------------------------
-# 2.5) Aurora 主题（第三方，不在 immortalwrt/luci 里）
-#      eamonxg 的仓库根目录就是标准 package 结构，clone 后整体拷进 package/。
-#      主题要求 OpenWrt 23.05+（ucode LuCI），本源码树满足；
-#      包自带 30_luci-theme-aurora 首次启动设默认，99-lang-theme 再兜底。
+# 2.5) Aurora 主题 + 配置插件（第三方，不在 immortalwrt/luci 里）
+#      eamonxg 的两个仓库（主题 + 配置插件）根目录都是标准 package 结构，
+#      clone 后整体拷进 package/。主题要求 OpenWrt 23.05+（ucode LuCI），
+#      本源码树满足；包自带 30_luci-theme-aurora 首次启动设默认，
+#      99-lang-theme 再兜底。配置插件提供 5 套预设 / 明暗色板 / 布局自定义。
 # ---------------------------------------------------------------
-group "引入 Aurora 主题"
+group "引入 Aurora 主题与配置插件"
 AURORA_DIR="$SRC/package/luci-theme-aurora"
-if [ ! -f "$AURORA_DIR/Makefile" ]; then
-  rm -rf /tmp/aurora-src
+AURORA_CFG_DIR="$SRC/package/luci-app-aurora-config"
+if [ ! -f "$AURORA_DIR/Makefile" ] || [ ! -f "$AURORA_CFG_DIR/Makefile" ]; then
+  rm -rf /tmp/aurora-src /tmp/aurora-cfg-src
   git clone --depth 1 https://github.com/eamonxg/luci-theme-aurora.git /tmp/aurora-src
-  mkdir -p "$AURORA_DIR"
+  git clone --depth 1 https://github.com/eamonxg/luci-app-aurora-config.git /tmp/aurora-cfg-src
+  mkdir -p "$AURORA_DIR" "$AURORA_CFG_DIR"
   cp -a /tmp/aurora-src/. "$AURORA_DIR/"
-  rm -rf /tmp/aurora-src
+  cp -a /tmp/aurora-cfg-src/. "$AURORA_CFG_DIR/"
+  rm -rf /tmp/aurora-src /tmp/aurora-cfg-src
 fi
 grep -q 'LUCI_TITLE:=Aurora Theme' "$AURORA_DIR/Makefile" || {
   echo "::error::Aurora 主题源码不完整"
+  exit 1
+}
+grep -q 'LuCI configuration UI for the Aurora theme' "$AURORA_CFG_DIR/Makefile" || {
+  echo "::error::Aurora 配置插件源码不完整"
   exit 1
 }
 endg
@@ -345,7 +353,7 @@ done
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \
          luci-app-airoha-npu luci-app-qmodem-next qmodem luci-app-openclash \
          luci-app-passwall luci-app-cpufreq xray-core \
-         luci-theme-aurora luci-i18n-base-zh-cn \
+         luci-theme-aurora luci-app-aurora-config luci-i18n-base-zh-cn \
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \

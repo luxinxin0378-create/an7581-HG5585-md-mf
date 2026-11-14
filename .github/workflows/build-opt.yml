@@ -120,7 +120,7 @@ jobs:
           cd "output/${{ matrix.model }}"
           {
             echo "版本类型: 优化版（代理调优 + BBR / RPS-RFS / WiFi 监管域 / ccache）"
-            echo "主题:     Aurora（默认）+ 官方 bootstrap"
+            echo "主题:     Aurora + aurora-config 配置插件（默认），官方 bootstrap 兜底"
           } >> ./*-BUILD-INFO.txt
           ls -lh
 
