@@ -7,10 +7,6 @@ MODEL="${1:?缺少机型名}"
 PROFILE="${2:?缺少 target profile}"
 MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.33}"
 
-# WITH_VANTAGE=0：编纯优化版（不拉 Vantage 源码、不选主题/看板，默认回到 Argon）
-WITH_VANTAGE="${WITH_VANTAGE:-1}"
-case "$WITH_VANTAGE" in 0|false|no|off) WITH_VANTAGE=0 ;; *) WITH_VANTAGE=1 ;; esac
-
 REPO="${GITHUB_WORKSPACE:?缺少 GITHUB_WORKSPACE}"
 SRC="$REPO/ponwrt"
 # 默认用正式版种子；测试构建可用 SEED_FILE 指向另一份 .config 种子
@@ -72,34 +68,25 @@ cat feeds.conf
 endg
 
 # ---------------------------------------------------------------
-# 2.5) Vantage 主题（第三方，不在 immortalwrt/luci 里）
-#      anothaDev 的仓库同时含 luci-theme-vantage 与 luci-app-vantage，
-#      根目录不是 feed 结构，直接 clone 后把主题目录拷进 package/。
-#      只取主题：app（仪表盘）还依赖 rpcd-mod-ucode / ucode-mod-nl80211
-#      等一串本固件未选的包，装上也跑不起来。
+# 2.5) Aurora 主题（第三方，不在 immortalwrt/luci 里）
+#      eamonxg 的仓库根目录就是标准 package 结构，clone 后整体拷进 package/。
+#      主题要求 OpenWrt 23.05+（ucode LuCI），本源码树满足；
+#      包自带 30_luci-theme-aurora 首次启动设默认，99-lang-theme 再兜底。
 # ---------------------------------------------------------------
-if [ "$WITH_VANTAGE" = "1" ]; then
-group "引入 Vantage 主题"
-VANTAGE_DIR="$SRC/package/luci-theme-vantage"
-VANTAGE_APP_DIR="$SRC/package/luci-app-vantage"
-if [ ! -f "$VANTAGE_DIR/Makefile" ] || [ ! -f "$VANTAGE_APP_DIR/Makefile" ]; then
-  rm -rf /tmp/vantage-src
-  git clone --depth 1 https://github.com/anothaDev/luci-theme-vantage.git /tmp/vantage-src
-  mkdir -p "$VANTAGE_DIR" "$VANTAGE_APP_DIR"
-  cp -a /tmp/vantage-src/luci-theme-vantage/. "$VANTAGE_DIR/"
-  cp -a /tmp/vantage-src/luci-app-vantage/.  "$VANTAGE_APP_DIR/"
-  rm -rf /tmp/vantage-src
+group "引入 Aurora 主题"
+AURORA_DIR="$SRC/package/luci-theme-aurora"
+if [ ! -f "$AURORA_DIR/Makefile" ]; then
+  rm -rf /tmp/aurora-src
+  git clone --depth 1 https://github.com/eamonxg/luci-theme-aurora.git /tmp/aurora-src
+  mkdir -p "$AURORA_DIR"
+  cp -a /tmp/aurora-src/. "$AURORA_DIR/"
+  rm -rf /tmp/aurora-src
 fi
-grep -q 'LUCI_TITLE:=Vantage theme' "$VANTAGE_DIR/Makefile" || {
-  echo "::error::Vantage 主题源码不完整"
-  exit 1
-}
-grep -q 'LUCI_TITLE:=Vantage dashboard' "$VANTAGE_APP_DIR/Makefile" || {
-  echo "::error::Vantage 看板源码不完整"
+grep -q 'LUCI_TITLE:=Aurora Theme' "$AURORA_DIR/Makefile" || {
+  echo "::error::Aurora 主题源码不完整"
   exit 1
 }
 endg
-fi
 
 # ---------------------------------------------------------------
 # 3) 机型定制（OpenWrt files/ overlay，直接编进 rootfs）
@@ -229,21 +216,13 @@ esac
 # 3.4 默认简体中文 + 默认主题（uci-defaults 开机首次执行，99- 前缀保证最后覆盖）
 #     dispatcher 读取 luci.main.lang：'zh_cn' 会被转成 'zh-cn' 去加载
 #     /usr/lib/lua/luci/i18n/*.zh-cn.lmo（由 luci-i18n-*-zh-cn 包提供）。
-#     主题包自带的 30_luci-theme-* 首次安装会设默认，这里 99- 兜底；
-#     WITH_VANTAGE=1 默认 Vantage，=0 默认 Argon（没装 Vantage 时不能指过去）。
-if [ "$WITH_VANTAGE" = "1" ]; then
-  THEME_PATH='/luci-static/vantage'
-  THEME_REGISTER="uci -q set luci.themes.Vantage='/luci-static/vantage'"
-else
-  THEME_PATH='/luci-static/argon'
-  THEME_REGISTER=''
-fi
+#     Aurora 包自带 30_luci-theme-aurora 首次安装会设默认，这里 99- 兜底
+#     （显式把 mediaurlbase 指向 aurora，防止任何旧值残留）。
 cat > "$OVL/etc/uci-defaults/99-lang-theme" <<LANGTHEME
 #!/bin/sh
 uci -q set luci.main.lang='zh_cn'
-uci -q set luci.themes.Argon='/luci-static/argon'
-${THEME_REGISTER}
-uci -q set luci.main.mediaurlbase='${THEME_PATH}'
+uci -q set luci.themes.Aurora='/luci-static/aurora'
+uci -q set luci.main.mediaurlbase='/luci-static/aurora'
 uci -q commit luci
 exit 0
 LANGTHEME
@@ -323,10 +302,6 @@ grep -q 'bool "Use ccache"$' config/Config-devel.in || {
   echo "CONFIG_TARGET_airoha_an7581_DEVICE_${PROFILE}=y"
 } > .config
 
-# 纯优化版：种子里的 Vantage 行即使存在也要剔掉，避免被 defconfig 选中
-if [ "$WITH_VANTAGE" = "0" ]; then
-  sed -i '/^CONFIG_PACKAGE_luci-theme-vantage=y$/d; /^CONFIG_PACKAGE_luci-app-vantage=y$/d' .config
-fi
 
 # QFirehose was explicitly requested for HG5585F CT; keep it model-scoped
 # so the XG-040G-MD image does not gain an unnecessary flashing utility.
@@ -367,14 +342,10 @@ for k in $KEYS; do
 done
 
 # 严格校验：用户要求的包必须全部入选
-WITH_VANTAGE_PKGS=''
-if [ "$WITH_VANTAGE" = "1" ]; then
-  WITH_VANTAGE_PKGS='luci-theme-vantage luci-app-vantage'
-fi
 for p in luci-app-onu luci-app-pon-status airoha-ponctl airoha-pond airoha-pon-debug \
          luci-app-airoha-npu luci-app-qmodem-next qmodem luci-app-openclash \
          luci-app-passwall luci-app-cpufreq xray-core \
-         luci-theme-argon ${WITH_VANTAGE_PKGS} luci-i18n-base-zh-cn \
+         luci-theme-aurora luci-i18n-base-zh-cn \
          usb-modeswitch kmod-usb-net-qmi-wwan chat comgt \
          kmod-usb-serial-sierrawireless kmod-mtk-t7xx \
          autocore kmod-crypto-hw-eip93 kmod-cryptodev openssl-util \
@@ -400,7 +371,7 @@ if ! grep -q "^CONFIG_LUCI_LANG_zh_Hans=y$" .config; then
   echo "::error::缺少 CONFIG_LUCI_LANG_zh_Hans，中文翻译包不会生效"
   exit 1
 fi
-echo "关键包校验通过（含中文 / Vantage + Argon 主题）"
+echo "关键包校验通过（含中文 / Aurora 主题）"
 grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET|PROFILE)' .config
 endg
 

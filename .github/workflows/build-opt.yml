@@ -1,8 +1,8 @@
-name: 构建优化版（不含 Vantage）
+name: 构建优化版
 
-# 纯优化版：BBR / RPS-RFS / WiFi 监管域 / ccache 全保留，
-# 但不内置 Vantage 主题与看板，默认主题回到 Argon。
-# 独立并发组，可与正式版（含 Vantage）同时跑，互不排队。
+# 优化版：BBR / RPS-RFS / 代理转发调优 / WiFi 监管域 / ccache 全保留。
+# 主题只带 Aurora（默认）+ 官方 bootstrap，无 Argon / Vantage。
+# 独立并发组，可与正式版同时跑，互不排队。
 on:
   workflow_dispatch:
 
@@ -36,7 +36,6 @@ jobs:
             subtarget: an7583
     env:
       FORCE_UNSAFE_CONFIGURE: "1"
-      WITH_VANTAGE: "0"
     steps:
       - name: 检出本仓库（配置与脚本）
         uses: actions/checkout@v4
@@ -116,21 +115,13 @@ jobs:
               ;;
           esac
 
-      - name: 标记为无 Vantage 版
+      - name: 追加版本说明
         run: |
           cd "output/${{ matrix.model }}"
-          for f in *.itb; do
-            [ -e "$f" ] && mv -v "$f" "${f%.itb}-novantage.itb"
-          done
-          for f in *-BUILD-INFO.txt; do
-            [ -e "$f" ] || continue
-            case "$f" in *novantage*) continue ;; esac
-            mv -v "$f" "${f%-BUILD-INFO.txt}-novantage-BUILD-INFO.txt"
-          done
           {
-            echo "版本类型: 纯优化版（不含 Vantage 主题与看板，默认 Argon）"
-            echo "包含:     BBR / RPS-RFS / WiFi 监管域 / ccache 构建缓存"
-          } >> ./*-novantage-BUILD-INFO.txt
+            echo "版本类型: 优化版（代理调优 + BBR / RPS-RFS / WiFi 监管域 / ccache）"
+            echo "主题:     Aurora（默认）+ 官方 bootstrap"
+          } >> ./*-BUILD-INFO.txt
           ls -lh
 
       - name: 上传固件
@@ -173,5 +164,5 @@ jobs:
           TAG="fw-opt-$(date +%Y%m%d-%H%M%S)-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "优化版固件（无 Vantage）${GITHUB_RUN_NUMBER}" \
-            --notes "机型：hg5585f-ct / xg-040g-md / hg5585f-cu / xg-040g-mf；纯优化版，不含 Vantage 主题与看板，默认 Argon；包含 BBR、RPS/RFS、WiFi 监管域、USB 4G/5G 驱动、EIP93 等既有优化。"
+            --title "优化版固件${GITHUB_RUN_NUMBER}" \
+            --notes "机型：hg5585f-ct / xg-040g-md / hg5585f-cu / xg-040g-mf；优化版，主题 Aurora（默认）+ 官方 bootstrap；包含代理调优、BBR、RPS/RFS、WiFi 监管域、USB 4G/5G 驱动、EIP93 等既有优化。"
