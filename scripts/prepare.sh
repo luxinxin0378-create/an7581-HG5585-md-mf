@@ -196,6 +196,14 @@ grep -q 'devmem' "$NPU_DIR/root/usr/libexec/rpcd/luci.airoha_npu" || {
   exit 1
 }
 echo "luci-app-airoha-npu 已覆盖为 rchen14b 版（含 PLL 超频 500-1600MHz）"
+# 注入中文翻译（rchen14b 上游只有西语 po）：po/zh_Hans 使构建系统生成
+# luci-i18n-airoha-npu-zh-cn 包（seed 显式 =y，与 wol/smartdns 同模式）。
+mkdir -p "$NPU_DIR/po/zh_Hans" "$NPU_DIR/luci-app-airoha-npu/po/zh_Hans"
+cp "$REPO/extra/files/npu-zh.po" "$NPU_DIR/po/zh_Hans/luci-app-airoha-npu.po"
+cp "$REPO/extra/files/npu-zh.po" "$NPU_DIR/luci-app-airoha-npu/po/zh_Hans/luci-app-airoha-npu.po"
+grep -q 'msgstr "CPU 频率"' "$NPU_DIR/po/zh_Hans/luci-app-airoha-npu.po" || {
+  echo "::error::npu 中文 po 注入失败"; exit 1; }
+echo "luci-app-airoha-npu 中文翻译已注入"
 endg
 
 # ---------------------------------------------------------------
@@ -229,8 +237,9 @@ TZ
 #     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
 #     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
 mkdir -p "$OVL/sbin"
-install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"  "$OVL/sbin/cpuinfo"
-install -m 0755 "$REPO/config/overlay/sbin/tempinfo" "$OVL/sbin/tempinfo"
+install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"      "$OVL/sbin/cpuinfo"
+install -m 0755 "$REPO/config/overlay/sbin/tempinfo"     "$OVL/sbin/tempinfo"
+install -m 0755 "$REPO/config/overlay/sbin/cpufreq_real" "$OVL/sbin/cpufreq_real"
 
 # 3.5 网络转发调优（PPE 未生效，转发全靠 CPU，这里榨多核）
 #     RPS：把网卡 RX 软中断从 CPU0 分散到 CPU1-3；RFS 按 socket 流建哈希。
