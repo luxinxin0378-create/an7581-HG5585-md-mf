@@ -600,6 +600,21 @@ uci commit firewall
 exit 0
 ZTEWAN
 
+# 95-npu-offload：NPU 硬件流卸载默认开启（Airoha PPE + NPU 硬件转发）
+#   flowtable 内核支持由 kmod-nft-offload 提供（上游 airoha generic config
+#   NF_FLOW_TABLE 未编入，必须装包；NET_AIROHA_NPU=y 驱动已内置）。
+#   开启后 forward 链直连流量经 PPE/NPU 硬件转发；PassWall 代理流量在
+#   mangle/nat prerouting 即被 REDIRECT/TPROXY 到本机终结，不进 forward
+#   链，不受卸载影响。uci-defaults 仅刷机后首次开机执行，用户之后手动
+#   关闭不会被回写。
+cat > "$OVL/etc/uci-defaults/95-npu-offload" <<'NPUOFF'
+#!/bin/sh
+uci -q set firewall.@defaults[0].flow_offloading='1'
+uci -q set firewall.@defaults[0].flow_offloading_hw='1'
+uci -q commit firewall
+exit 0
+NPUOFF
+
 # 96-passwall-dns：PassWall 远程 DNS 预置为 8.8.8.8（规避 1.1.1.1 anycast 路由黑洞）
 #   根因（2026-11-26 设备实测）：PassWall 默认 remote_dns=1.1.1.1，生成 chinadns-ng
 #   trust-dns tcp://1.1.1.1，所有境外域名解析都依赖该可信 DNS。而本节点机房侧对
