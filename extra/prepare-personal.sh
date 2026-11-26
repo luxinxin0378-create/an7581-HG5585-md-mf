@@ -190,6 +190,15 @@ grep -q 'devmem' "$NPU_DIR/root/usr/libexec/rpcd/luci.airoha_npu" || {
   exit 1
 }
 echo "luci-app-airoha-npu rchen14b 版就绪（含超频）"
+# 注入中文翻译（rchen14b 上游只有西语 po）：po/zh_Hans 使构建系统生成
+# luci-i18n-airoha-npu-zh-cn 包（seed 显式 =y，与 wol/smartdns 同模式）。
+# msgid 与 view JS _() 内字符串逐字节一致（含后端返回状态词 Active/Idle 等）。
+mkdir -p "$NPU_DIR/po/zh_Hans" "$NPU_DIR/luci-app-airoha-npu/po/zh_Hans"
+cp "$REPO/extra/files/npu-zh.po" "$NPU_DIR/po/zh_Hans/luci-app-airoha-npu.po"
+cp "$REPO/extra/files/npu-zh.po" "$NPU_DIR/luci-app-airoha-npu/po/zh_Hans/luci-app-airoha-npu.po"
+grep -q 'msgstr "CPU 频率"' "$NPU_DIR/po/zh_Hans/luci-app-airoha-npu.po" || {
+  echo "::error::npu 中文 po 注入失败"; exit 1; }
+echo "luci-app-airoha-npu 中文翻译已注入"
 endg
 
 # ---------------------------------------------------------------
@@ -226,8 +235,9 @@ TZ
 #     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
 #     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
 mkdir -p "$OVL/sbin"
-install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"  "$OVL/sbin/cpuinfo"
-install -m 0755 "$REPO/config/overlay/sbin/tempinfo" "$OVL/sbin/tempinfo"
+install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"      "$OVL/sbin/cpuinfo"
+install -m 0755 "$REPO/config/overlay/sbin/tempinfo"     "$OVL/sbin/tempinfo"
+install -m 0755 "$REPO/config/overlay/sbin/cpufreq_real" "$OVL/sbin/cpufreq_real"
 
 # 3.1b 概览页增强：CPU 温度 / CPU 频率 / 固件编译时间三行（覆盖 luci-mod-status 主页 include）
 #     fork 前端靠 autocore 提供的 rpcd 扩展（luci.getTempInfo/getCPUInfo）读数，
@@ -562,7 +572,10 @@ LAN25G
 #   firewall wan 区按 name 动态定位，不依赖 zone 索引。
 cat > "$OVL/etc/uci-defaults/98-zte-wan" <<'ZTEWAN'
 #!/bin/sh
-[ -e /sys/class/net/eth1 ] || exit 0
+# 注：不做 /sys/class/net/eth1 存在性检测——uci 配置是声明式的，
+# netifd 会在内核枚举出 eth1 后自动挂载接口；首启 uci-defaults 执行时
+# eth1 往往还没枚举完（airoha 以太网驱动 probe 晚），存在性检测会误杀。
+# 本固件仅面向 md/mf 两机型，eth1 硬件固定存在。
 for d in $(uci -q show network | sed -n 's/^network\.\([^.=]*\)=device$/\1/p'); do
   [ "$(uci -q get network.$d.name)" = "br-lan" ] || continue
   case " $(uci -q get network.$d.ports 2>/dev/null) " in
