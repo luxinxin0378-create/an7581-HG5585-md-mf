@@ -214,6 +214,23 @@ OVL="$SRC/files"
 mkdir -p "$OVL/etc/uci-defaults" "$OVL/etc/openclash/core"
 
 # ---------------------------------------------------------------
+# 3.0a NPU 硬件流卸载默认开启（Airoha PPE + NPU 硬件转发）
+#   flowtable 内核支持由 kmod-nft-offload 提供（上游 airoha generic config
+#   NF_FLOW_TABLE 未编入，必须装包；NET_AIROHA_NPU=y 驱动已内置）。
+#   开启后 forward 链直连流量经 PPE/NPU 硬件转发；PassWall 代理流量在
+#   mangle/nat prerouting 即被 REDIRECT/TPROXY 到本机终结，不进 forward
+#   链，不受卸载影响。uci-defaults 仅刷机后首次开机执行，用户之后手动
+#   关闭不会被回写。
+# ---------------------------------------------------------------
+cat > "$OVL/etc/uci-defaults/95-npu-offload" <<'NPUOFF'
+#!/bin/sh
+uci -q set firewall.@defaults[0].flow_offloading='1'
+uci -q set firewall.@defaults[0].flow_offloading_hw='1'
+uci -q commit firewall
+exit 0
+NPUOFF
+
+# ---------------------------------------------------------------
 # 3.0 默认时区：中国标准时间（Asia/Shanghai UTC+8）+ 国内 NTP
 #     LuCI 时区下拉依赖 zoneinfo 数据包（seed 提供 core+asia）；
 #     时间准确是 VMess/TLS 代理握手的前提。
