@@ -1,0 +1,233 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-airoha-npu\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "N/A"
+msgstr "无数据"
+
+msgid "No clients"
+msgstr "无客户端"
+
+msgid "Idle"
+msgstr "空闲"
+
+msgid "Poor"
+msgstr "差"
+
+msgid "Fair"
+msgstr "一般"
+
+msgid "Good"
+msgstr "良好"
+
+msgid "Band %d"
+msgstr "频段 %d"
+
+msgid "%d sta"
+msgstr "%d 个终端"
+
+msgid "devmem is not available on this build"
+msgstr "此固件未启用 devmem，PLL 超频不可用"
+
+msgid "TX"
+msgstr "发送"
+
+msgid "RX"
+msgstr "接收"
+
+msgid "TX Drop"
+msgstr "发送丢包"
+
+msgid "RX Drop"
+msgstr "接收丢包"
+
+msgid "HW Offload: %s%%"
+msgstr "硬件卸载: %s%%"
+
+msgid "CPU: %s"
+msgstr "CPU: %s"
+
+msgid "HWF: %s"
+msgstr "硬件流: %s"
+
+msgid "TX: %s"
+msgstr "发送: %s"
+
+msgid "P7 WiFi DMA"
+msgstr "P7 WiFi DMA"
+
+msgid "Drop %s"
+msgstr "丢弃 %s"
+
+msgid "Active"
+msgstr "运行中"
+
+msgid "Off"
+msgstr "关闭"
+
+msgid "8x RISC-V via PCIe RAM"
+msgstr "8 核 RISC-V（经 PCIe RAM 通信）"
+
+msgid "Manages: "
+msgstr "管理范围: "
+
+msgid "PPE init, WDMA rings, flow stats"
+msgstr "PPE 初始化、WDMA 环、流统计"
+
+msgid "PPE Engines"
+msgstr "PPE 引擎"
+
+msgid "Bound "
+msgstr "已绑定 "
+
+msgid "Total "
+msgstr "总计 "
+
+msgid "PSE Shared Buffer"
+msgstr "PSE 共享缓冲区"
+
+msgid "%d used / %d free (%s%%)"
+msgstr "%d 已用 / %d 空闲 (%s%%)"
+
+msgid "Internal Switch (1G LAN3/4)"
+msgstr "内置交换机 (1G LAN3/4)"
+
+msgid "WAN (USXGMII 10G)"
+msgstr "WAN (USXGMII 10G)"
+
+msgid "LAN2 (USXGMII 10G)"
+msgstr "LAN2 (USXGMII 10G)"
+
+msgid "CPU DMA 1"
+msgstr "CPU DMA 1"
+
+msgid "CPU DMA 2"
+msgstr "CPU DMA 2"
+
+msgid "PSE Port Queue Status"
+msgstr "PSE 端口队列状态"
+
+msgid "Error: %s"
+msgstr "错误: %s"
+
+msgid "Could not set the governor: %s"
+msgstr "设置调频策略失败: %s"
+
+msgid "Could not set the maximum frequency: %s"
+msgstr "设置最高频率失败: %s"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Confirm overclock"
+msgstr "确认超频"
+
+msgid "%d MHz is above %d MHz, which is as far as this has been tested. The board may run unstable or stop responding until it is power cycled."
+msgstr "%d MHz 超过了实测验证上限 %d MHz，继续超频可能导致设备不稳定或失去响应，需要断电重启才能恢复。"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Continue"
+msgstr "仍要继续"
+
+msgid "Applying..."
+msgstr "应用中..."
+
+msgid "Failed: %s"
+msgstr "失败: %s"
+
+msgid "CPU set to %d MHz"
+msgstr "CPU 已设为 %d MHz"
+
+msgid "Overclock request failed: %s"
+msgstr "超频请求失败: %s"
+
+msgid "Apply"
+msgstr "应用"
+
+msgid "Not available: unrecognised SoC"
+msgstr "不可用: 未识别的 SoC"
+
+msgid "The frequency must be between %d and %d MHz"
+msgstr "频率必须在 %d 到 %d MHz 之间"
+
+msgid "Direct PLL write, %d-%d MHz. Tested up to %d MHz."
+msgstr "PLL 寄存器直写，范围 %d-%d MHz。社区实测稳定上限 %d MHz。"
+
+msgid "Airoha SoC Status"
+msgstr "Airoha SoC 状态"
+
+msgid "CPU Frequency"
+msgstr "CPU 频率"
+
+msgid "Current Frequency"
+msgstr "当前频率"
+
+msgid "Governor"
+msgstr "调频策略"
+
+msgid "Max Frequency"
+msgstr "最高频率"
+
+msgid "Overclock"
+msgstr "超频 (PLL 直写)"
+
+msgid "CPU Cores"
+msgstr "CPU 核心数"
+
+msgid "SoC"
+msgstr "SoC 型号"
+
+msgid "NPU & Offload Engine"
+msgstr "NPU 与硬件卸载引擎"
+
+msgid "NPU Status"
+msgstr "NPU 状态"
+
+msgid "Active (%s)"
+msgstr "运行中 (%s)"
+
+msgid "Not Active"
+msgstr "未启用"
+
+msgid "Firmware / Clock / Cores"
+msgstr "固件 / 时钟 / 核心数"
+
+msgid "%s | %s | %d cores"
+msgstr "%s | %s | %d 核心"
+
+msgid "Reserved Memory"
+msgstr "预留内存"
+
+msgid "%s (%d regions)"
+msgstr "%s (%d 个区域)"
+
+msgid "Frame Engine"
+msgstr "帧引擎 (Frame Engine)"
+
+msgid "PPE Flow Offload Entries"
+msgstr "PPE 流卸载表"
+
+msgid "Index"
+msgstr "索引"
+
+msgid "State"
+msgstr "状态"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Original Flow"
+msgstr "原始流"
+
+msgid "New Flow"
+msgstr "新流"
+
+msgid "Ethernet"
+msgstr "以太网"
