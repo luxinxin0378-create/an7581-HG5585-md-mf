@@ -29,6 +29,18 @@ group "克隆 pbs05/ponwrt (master)"
 git clone --depth 1 https://github.com/pbs05/ponwrt.git "$SRC"
 cd "$SRC"
 
+# 出厂默认 LAN IP 写进配置生成器（不使用 uci-defaults）：
+#   config_generate 生成固件自带的 /etc/config/network 默认值，新装/重置后
+#   LAN 直接就是 192.168.2.1；保留配置升级时 sysupgrade 回写用户的
+#   /etc/config/network，config_generate 不参与生成——用户已改的 LAN IP
+#   （如 192.168.88.1）不会被覆盖回默认（修复「升级后网关被重置」）。
+CG="$SRC/package/base-files/files/bin/config_generate"
+[ -f "$CG" ] || { echo "::error::config_generate 不存在"; exit 1; }
+sed -i 's|ipaddr:-"192.168.1.1"|ipaddr:-"192.168.2.1"|' "$CG"
+grep -q 'ipaddr:-"192.168.2.1"' "$CG" || {
+  echo "::error::config_generate 默认 LAN IP patch 失败"; exit 1; }
+echo "config_generate 出厂 LAN IP → 192.168.2.1"
+
 # 编译缓存：dl 与 ccache 放到源码树之外，由 Actions cache 跨构建复用
 mkdir -p "$REPO/cache/dl" "$REPO/cache/ccache"
 [ -e "$SRC/dl" ] || ln -s "$REPO/cache/dl" "$SRC/dl"
@@ -536,16 +548,9 @@ uci -q commit ksmbd
 exit 0
 KSMBDSHARE
 
-# 3.3 登录 IP 192.168.2.1
-cat > "$OVL/etc/uci-defaults/99-lan-ip" <<'LANIP'
-#!/bin/sh
-uci -q batch <<'UCIBATCH'
-set network.lan.ipaddr='192.168.2.1'
-set network.lan.netmask='255.255.255.0'
-commit network
-UCIBATCH
-exit 0
-LANIP
+# 3.3 登录 IP 192.168.2.1 —— 已移入 config_generate（clone 段 patch）：
+#     出厂默认直接生成在固件 /etc/config/network 里，不再用 uci-defaults；
+#     保留配置升级时用户改过的 LAN IP（如 192.168.88.1）不会被覆盖回默认。
 
 # 2.5G 口并入 LAN 桥：md/mf 的 2.5G RJ45 是独立 GMAC（gdm4），netdev 名 lan1
 # （EN8811H 2500base-x）。上游兜底配置只桥 eth0，lan1 不在任何接口 → 不通。
