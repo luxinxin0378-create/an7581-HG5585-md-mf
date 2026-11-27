@@ -1,3 +1,4 @@
+# 临时发布 workflow（发布完成后删除）
 name: 手动发布 Release（临时）
 on:
   workflow_dispatch:
