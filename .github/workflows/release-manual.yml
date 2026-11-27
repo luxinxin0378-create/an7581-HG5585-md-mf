@@ -1,0 +1,62 @@
+name: 手动发布 Release（临时）
+on:
+  workflow_dispatch:
+    inputs:
+      main_run_id:
+        description: '正式版构建 run id'
+        required: true
+      personal_run_id:
+        description: '个人版构建 run id'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ inputs.personal_run_id }}" --repo "$GITHUB_REPOSITORY" -p 'fw-personal-*' -D dl/personal
+          gh run download "${{ inputs.main_run_id }}" --repo "$GITHUB_REPOSITORY" -p 'firmware-*' -D dl/main
+          find dl -type f
+
+      - name: 发布个人版 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=fw-personal-20261127
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "个人精简版固件 md/mf · 2026-11-27 · 全修复合并版" \
+            --notes "## 本版修复
+- PassWall 远程 DNS 固化 8.8.8.8（规避 1.1.1.1 anycast 路由黑洞，境外域名解析恢复）
+- 默认主题 Argon（mac 主题已移除），界面中文
+- CPU 超频支持（NPU 页内），主页 CPU 频率 PLL 直读显示
+- NPU 硬件流量加速默认开启（flow_offloading + kmod-nft-offload）
+- 出厂 LAN IP 192.168.2.1 写入 config_generate：保留配置升级不再重置网关
+- zte WAN（eth1）探测时序修复，网络接口页正常显示
+- 适配机型：xg-040g-md / xg-040g-mf
+- 从旧版本升级：保留配置升级即可，用户改过的 LAN IP / 网关不再被覆盖" || true
+          find dl/personal -type f \( -name '*.bin' -o -name '*.img' -o -name '*.itb' \) -print0 | xargs -0 -I{} gh release upload "$TAG" "{}" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: 发布正式版 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=fw-20261127
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "正式版固件五机型 · 2026-11-27 · 全修复合并版" \
+            --notes "## 本版修复（与个人版同步）
+- PassWall 远程 DNS 固化 8.8.8.8（规避 1.1.1.1 anycast 路由黑洞）
+- 默认主题 Argon，界面中文
+- CPU 超频支持 + 主页 CPU 频率 PLL 直读显示
+- NPU 硬件流量加速默认开启
+- 出厂 LAN IP 192.168.2.1 写入 config_generate：保留配置升级不再重置网关
+- zte WAN（eth1）探测时序修复
+- 适配机型：xg-040g-md / xg-040g-mf / hg5585f-cu / hg5585f-ct / h3c_hm2004-du
+- 内置 PassWall（Xray 核心）+ OpenClash + AdGuard Home + udpxy
+- 从旧版本升级：保留配置升级即可" || true
+          find dl/main -type f \( -name '*.bin' -o -name '*.img' -o -name '*.itb' \) -print0 | xargs -0 -I{} gh release upload "$TAG" "{}" --repo "$GITHUB_REPOSITORY" --clobber
