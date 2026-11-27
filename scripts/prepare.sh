@@ -32,6 +32,18 @@ group "克隆 pbs05/ponwrt"
 git clone --depth 1 https://github.com/pbs05/ponwrt.git "$SRC"
 cd "$SRC"
 
+# 出厂默认 LAN IP 写进配置生成器（不使用 uci-defaults）：
+#   config_generate 生成固件自带的 /etc/config/network 默认值，新装/重置后
+#   LAN 直接就是 192.168.2.1；保留配置升级时 sysupgrade 回写用户的
+#   /etc/config/network，config_generate 不参与生成——用户已改的 LAN IP
+#   不会被覆盖回默认（修复「升级后网关被重置」）。
+CG="$SRC/package/base-files/files/bin/config_generate"
+[ -f "$CG" ] || { echo "::error::config_generate 不存在"; exit 1; }
+sed -i 's|ipaddr:-"192.168.1.1"|ipaddr:-"192.168.2.1"|' "$CG"
+grep -q 'ipaddr:-"192.168.2.1"' "$CG" || {
+  echo "::error::config_generate 默认 LAN IP patch 失败"; exit 1; }
+echo "config_generate 出厂 LAN IP → 192.168.2.1"
+
 # 编译缓存：dl（源码包）与 ccache（目标文件）放在源码树之外，
 # 由 GitHub Actions cache 在构建之间复用。软链给 make 用。
 # git clone 出来的目录里没有 dl/.ccache，软链不会覆盖已有内容。
@@ -402,16 +414,9 @@ nobody:*:0:0:99999:7:::
 ntp:*:0:0:99999:7:::
 SHADOW
 
-# 3.2 登录 IP 192.168.2.1
-cat > "$OVL/etc/uci-defaults/99-lan-ip" <<'LANIP'
-#!/bin/sh
-uci -q batch <<'UCIBATCH'
-set network.lan.ipaddr='192.168.2.1'
-set network.lan.netmask='255.255.255.0'
-commit network
-UCIBATCH
-exit 0
-LANIP
+# 3.2 登录 IP 192.168.2.1 —— 已移入 config_generate（clone 段 patch）：
+#     出厂默认直接生成在固件 /etc/config/network 里，不再用 uci-defaults；
+#     保留配置升级时用户改过的 LAN IP 不会被覆盖回默认。
 
 # 3.3 WiFi：hg5585f 系列与 HM2004-DU，SSID 以机型命名(HG5585F-CT / HM2004-DU ...)，密码八个 8
 #     不是 hg5585f/hm2004 的机型(如 xg-040g 系列)则跳过
