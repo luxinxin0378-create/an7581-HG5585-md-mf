@@ -295,11 +295,13 @@ grep -q "flow_offloading_hw" "$OVL/etc/config/firewall" || {
 # 3.1 概览页数据脚本：LuCI 状态页通过 /sbin/cpuinfo 读架构+频率。
 #     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
 #     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
-#     tempinfo 已随温度行移除（2026-11-28，避免与架构行温度重复显示）。
+#     tempinfo（CPU 温度——2026-11-28 恢复独立行，只显示一遍；
+#     架构行不再拼温度，用户确认保留温度显示）。
 mkdir -p "$OVL/sbin"
 install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"      "$OVL/sbin/cpuinfo"
 install -m 0755 "$REPO/config/overlay/sbin/cpufreq_real" "$OVL/sbin/cpufreq_real"
 install -m 0755 "$REPO/config/overlay/sbin/ppeinfo"      "$OVL/sbin/ppeinfo"
+install -m 0755 "$REPO/config/overlay/sbin/tempinfo"     "$OVL/sbin/tempinfo"
 
 # 3.1b 概览页自定义系统块（覆盖 luci-mod-status 10_system.js）
 #     fork 前端靠 autocore 提供的 rpcd 扩展（luci.getTempInfo/getCPUInfo）读数，
@@ -373,6 +375,7 @@ return baseclass.extend({
 			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/cpu0/cpuinfo_cur_freq'), ''),
 			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/cpufreq_real 2>/dev/null']), {}),
 			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/ppeinfo 2>/dev/null']), {}),
+			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/tempinfo 2>/dev/null']), {}),
 			uci.load('system')
 		]);
 	},
@@ -389,7 +392,8 @@ return baseclass.extend({
 		    freqk2      = parseInt(data[8], 10),
 		    freqk3      = parseInt(data[9], 10),
 		    freqk0      = (L.isObject(data[10]) && typeof data[10].stdout == 'string') ? parseInt(data[10].stdout, 10) : 0,
-		    ppeRaw      = (L.isObject(data[11]) && typeof data[11].stdout == 'string') ? data[11].stdout.trim() : '';
+		    ppeRaw      = (L.isObject(data[11]) && typeof data[11].stdout == 'string') ? data[11].stdout.trim() : '',
+		    tempRaw     = (L.isObject(data[12]) && typeof data[12].stdout == 'string') ? data[12].stdout.trim() : '';
 
 		luciversion = luciversion.branch + ' ' + luciversion.revision;
 
@@ -428,6 +432,10 @@ return baseclass.extend({
 		   x/y = 硬件绑定中/表内总条目）；debugfs 缺失或不可读时隐藏该行 */
 		var ppestr = (ppeRaw && ppeRaw != 'unavailable') ? ppeRaw : null;
 
+		/* 温度：/sbin/tempinfo 输出（形如 "CPU: 79.9°C"），独立一行只显示
+		   一遍，架构行不带温度（2026-11-28 恢复）；无有效输出时隐藏 */
+		var tempstr = (tempRaw && tempRaw.indexOf('°') > 0) ? tempRaw : null;
+
 		/* 固件编译时间：编译时注入（占位符用 indexOf 检测，避免 sed 误伤本行） */
 		var buildstr = (FW_BUILD_TIME && FW_BUILD_TIME.indexOf('BUILD') < 0) ? FW_BUILD_TIME : null;
 
@@ -435,6 +443,7 @@ return baseclass.extend({
 			_('Hostname'),         boardinfo.hostname,
 			_('Model'),            boardinfo.model + (cpubench.cpubench || ''),
 			_('Architecture'),     cpuinfo.cpuinfo || boardinfo.system,
+			(tempstr != null) ? _('CPU 温度') : null, tempstr,
 			_('Target Platform'),  (L.isObject(boardinfo.release) ? boardinfo.release.target : ''),
 			_('Firmware Version'), (L.isObject(boardinfo.release) ? boardinfo.release.description + ' / ' : '') + (luciversion || ''),
 			(buildstr != null) ? _('固件编译时间') : null, buildstr,
@@ -479,6 +488,8 @@ echo "BUILD_TIME 注入结果: $INJECTED"
 echo "$INJECTED" | grep -q "FW_BUILD_TIME = '20" || { echo "::error::固件编译时间注入失败"; exit 1; }
 grep -q "ppeinfo" "$OVL/www/luci-static/resources/view/status/include/10_system.js" || {
   echo "::error::10_system.js 缺少 PPE 数据源"; exit 1; }
+grep -q "tempinfo" "$OVL/www/luci-static/resources/view/status/include/10_system.js" || {
+  echo "::error::10_system.js 缺少温度数据源"; exit 1; }
 
 # 3.1c 远程访问：Tailscale 默认开机自启（首次需在 LuCI → 服务 → Tailscale 登录账号）
 cat > "$OVL/etc/uci-defaults/99-ddnsto" <<'TS'
