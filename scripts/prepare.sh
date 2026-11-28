@@ -212,74 +212,52 @@ grep -q "option lang 'zh_cn'" "$OVL/etc/config/luci" && \
 grep -q "mediaurlbase '/luci-static/argon'" "$OVL/etc/config/luci" || {
   echo "::error::luci 静态配置生成失败"; exit 1; }
 
-# 3.0.2 system：Asia/Shanghai + 国内 NTP（替代 99-timezone；hostname 固化为机型名）
-SYSF="$SRC/package/base-files/files/etc/config/system"
-[ -f "$SYSF" ] || { echo "::error::base-files 默认 system config 未找到"; exit 1; }
-python3 - "$SYSF" "$OVL/etc/config/system" "$MODEL" <<'PY'
-import re, sys
-src, dst, model = sys.argv[1], sys.argv[2], sys.argv[3]
-t = open(src).read()
-t = re.sub(r"option hostname\s+'[^']*'", "option hostname '%s'" % model, t, count=1)
-# 时区两行无条件重建：先删旧行，再插入到 config system 段首
-t = re.sub(r"\toption (timezone|zonename)\s+'[^']*'\n", "", t)
-t2, n = re.subn(r"(config system\b[^\n]*\n)",
-                lambda m: m.group(0) + "\toption timezone 'CST-8'\n\toption zonename 'Asia/Shanghai'\n",
-                t, count=1)
-if n != 1:
-    sys.exit(1)
-t2 = re.sub(r"config timeserver 'ntp'.*?(?=\nconfig |\Z)", "", t2, flags=re.S)
-t2 = t2.rstrip() + """
-
-config timeserver 'ntp'
-	option enabled '1'
-	list server 'ntp.aliyun.com'
-	list server 'ntp.tencent.com'
-	list server 'cn.pool.ntp.org'
-"""
-open(dst, "w").write(t2)
-PY
-grep -q "CST-8" "$OVL/etc/config/system" && grep -q "ntp.aliyun.com" "$OVL/etc/config/system" && \
-grep -q "option hostname '$MODEL'" "$OVL/etc/config/system" || {
-  echo "::error::system 静态配置生成失败"; exit 1; }
+# 3.0.2 system：Asia/Shanghai + 国内 NTP + hostname 固化机型名（替代 99-timezone）
+#   源树没有静态 system config——它和 network 一样由 config_generate 在
+#   构建 rootfs 时生成，因此这里直接 patch config_generate 的出厂默认值
+#   （与 LAN IP 的 patch 方案同构），出厂即终态。
+CGF="$SRC/package/base-files/files/bin/config_generate"
+[ -f "$CGF" ] || { echo "::error::config_generate 未找到"; exit 1; }
+sed -i \
+  -e "s|set system.@system\[-1\].hostname='ponwrt'|set system.@system[-1].hostname='$MODEL'|" \
+  -e "s|set system.@system\[-1\].timezone='GMT0'|set system.@system[-1].timezone='CST-8'|" \
+  -e "s|set system.@system\[-1\].zonename='UTC'|set system.@system[-1].zonename='Asia/Shanghai'|" \
+  -e "s|add_list system.ntp.server='time.apple.com'|add_list system.ntp.server='ntp.aliyun.com'|" \
+  -e "s|add_list system.ntp.server='time1.google.com'|add_list system.ntp.server='ntp.tencent.com'|" \
+  -e "s|add_list system.ntp.server='time.cloudflare.com'|add_list system.ntp.server='cn.pool.ntp.org'|" \
+  -e "s|add_list system.ntp.server='pool.ntp.org'|add_list system.ntp.server='time.ustc.edu.cn'|" \
+  "$CGF"
+grep -q "hostname='$MODEL'" "$CGF" && grep -q "timezone='CST-8'" "$CGF" && \
+grep -q "zonename='Asia/Shanghai'" "$CGF" && grep -q "ntp.aliyun.com" "$CGF" || {
+  echo "::error::config_generate system 默认值 patch 失败"; exit 1; }
 
 # 3.0.3 firewall：NPU 硬件流卸载默认开启（替代 95-npu-offload）
-FWF="$(find "$SRC/package" -path '*firewall*/files/etc/config/firewall' 2>/dev/null | head -1)"
-[ -n "$FWF" ] || { echo "::error::firewall 默认 config 未找到"; exit 1; }
-cp "$FWF" "$OVL/etc/config/firewall"
-python3 - "$OVL/etc/config/firewall" <<'PY'
+#   上游 firewall.config 已自带 flow_offloading=1（软件卸载默认开），只补
+#   硬件卸载开关；真实源文件是 files/firewall.config（由包 Makefile 拷成
+#   /etc/config/firewall），files 覆盖同名文件即生效。
+FWF="$SRC/package/network/config/firewall/files/firewall.config"
+[ -f "$FWF" ] || { echo "::error::firewall 默认 config 未找到"; exit 1; }
+python3 - "$FWF" "$OVL/etc/config/firewall" <<'PY'
 import re, sys
 t = open(sys.argv[1]).read()
-t2, n = re.subn(r"config defaults[^\n]*\n",
-                lambda m: m.group(0) + "\toption flow_offloading '1'\n\toption flow_offloading_hw '1'\n",
-                t, count=1)
+if "flow_offloading_hw" in t:
+    open(sys.argv[2], "w").write(t)
+    sys.exit(0)
+t2, n = re.subn(r"(\toption flow_offloading\t1\n)",
+                "\\1\toption flow_offloading_hw\t1\n", t, count=1)
 if n != 1:
     sys.exit(1)
-open(sys.argv[1], "w").write(t2)
+open(sys.argv[2], "w").write(t2)
 PY
 [ $? -eq 0 ] || { echo "::error::firewall 静态配置生成失败"; exit 1; }
-grep -q "flow_offloading_hw '1'" "$OVL/etc/config/firewall" || {
-  echo "::error::firewall flow_offloading 校验失败"; exit 1; }
+grep -q "flow_offloading_hw" "$OVL/etc/config/firewall" || {
+  echo "::error::firewall flow_offloading_hw 校验失败"; exit 1; }
 
-# 3.0.4 dhcp：dnsmasq 缓存扩容 2000（替代 98-dns-cache）
-DHCPF="$(find "$SRC/package" -path '*dhcp*/files/etc/config/dhcp' 2>/dev/null | head -1)"
-[ -n "$DHCPF" ] || { echo "::error::dhcp 默认 config 未找到"; exit 1; }
-cp "$DHCPF" "$OVL/etc/config/dhcp"
-python3 - "$OVL/etc/config/dhcp" <<'PY'
-import re, sys
-t = open(sys.argv[1]).read()
-t2, n = re.subn(r"config dnsmasq[^\n]*\n",
-                lambda m: m.group(0) + "\toption cachesize '2000'\n",
-                t, count=1)
-if n != 1:
-    sys.exit(1)
-open(sys.argv[1], "w").write(t2)
-PY
-[ $? -eq 0 ] || { echo "::error::dhcp 静态配置生成失败"; exit 1; }
-grep -q "cachesize '2000'" "$OVL/etc/config/dhcp" || {
-  echo "::error::dhcp cachesize 校验失败"; exit 1; }
+# 3.0.4 dhcp：无需注入——上游 dnsmasq 默认 dhcp.conf 已自带 cachesize 8000
+#   （比原 98-dns-cache 配方 2000 更大），保持上游值，不再 files 覆盖。
 
 # ---------------------------------------------------------------
-# 3.0.2' 时区/NTP：已由 3.0.2 静态配置文件化（files/etc/config/system），
+# 3.0.2' 时区/NTP：已由 3.0.2 patch config_generate 实现（出厂默认值），
 #       原配方见 99-timezone 删除记录；开机 uci-defaults 不再涉及时区。
 # ---------------------------------------------------------------
 
@@ -394,7 +372,7 @@ net.ipv4.tcp_wmem = 4096 65536 16777216
 net.netfilter.nf_conntrack_max = 65536
 PROXYTUNE
 
-# dnsmasq 缓存扩容 2000：已由 3.0.4 静态配置文件化（files/etc/config/dhcp）
+# dnsmasq 缓存：上游 dhcp.conf 默认 cachesize 8000（优于旧配方 2000），无需覆盖
 
 # 3.1 登录密码 root（MD5-crypt，失败时用等价的固定 hash 兜底）
 ROOT_HASH="$(openssl passwd -1 -salt airoha root 2>/dev/null || true)"
