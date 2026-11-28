@@ -1,10 +1,10 @@
 #!/bin/sh
 # LuCI 概览页「Architecture」数据源：rpcd 调用 /sbin/cpuinfo
-# 输出形如：ARMv8 Processor rev 4 x 4 (1300MHz, 46.2°C)
+# 输出形如：ARMv8 Processor rev 4 x 4 (1300MHz)
 # 频率走 /sbin/cpufreq_real：PLL 寄存器直读优先（真值，含 luci-app-airoha-npu
 # 的 PLL 直写超频——cpufreq sysfs 感知不到寄存器直写），cpufreq sysfs 兜底。
+# 温度不在此显示（概览温度行已按需求移除，避免与架构行重复显示）。
 CPUINFO="/proc/cpuinfo"
-THERMAL="/sys/class/thermal/thermal_zone0/temp"
 
 arch="$(awk -F': ' '/^model name/ {print $2; exit}' "$CPUINFO")"
 [ -n "$arch" ] || arch="$(awk -F': ' '/^Processor/ {print $2; exit}' "$CPUINFO")"
@@ -19,17 +19,8 @@ freqk="$(/sbin/cpufreq_real 2>/dev/null)"
 case "$freqk" in ''|*[!0-9]*) freqk="" ;; esac
 [ -n "$freqk" ] && freq="$(awk -v k="$freqk" 'BEGIN{printf "%.0fMHz", k / 1000}')"
 
-temp=""
-if [ -r "$THERMAL" ]; then
-	temp="$(awk '{printf "%.1f°C", $1 / 1000}' "$THERMAL")"
-fi
-
-if [ -n "$freq" ] && [ -n "$temp" ]; then
-	printf '%s x %s (%s, %s)' "$arch" "$cores" "$freq" "$temp"
-elif [ -n "$freq" ]; then
+if [ -n "$freq" ]; then
 	printf '%s x %s (%s)' "$arch" "$cores" "$freq"
-elif [ -n "$temp" ]; then
-	printf '%s x %s (%s)' "$arch" "$cores" "$temp"
 else
 	printf '%s x %s' "$arch" "$cores"
 fi
