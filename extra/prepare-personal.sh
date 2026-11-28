@@ -292,22 +292,23 @@ grep -q "flow_offloading_hw" "$OVL/etc/config/firewall" || {
 # ---------------------------------------------------------------
 
 
-# 3.1 概览页频率/温度显示：LuCI 状态页通过 /sbin/cpuinfo、/sbin/tempinfo 读数。
+# 3.1 概览页数据脚本：LuCI 状态页通过 /sbin/cpuinfo 读架构+频率。
 #     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
 #     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
+#     tempinfo 已随温度行移除（2026-11-28，避免与架构行温度重复显示）。
 mkdir -p "$OVL/sbin"
 install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"      "$OVL/sbin/cpuinfo"
-install -m 0755 "$REPO/config/overlay/sbin/tempinfo"     "$OVL/sbin/tempinfo"
 install -m 0755 "$REPO/config/overlay/sbin/cpufreq_real" "$OVL/sbin/cpufreq_real"
+install -m 0755 "$REPO/config/overlay/sbin/ppeinfo"      "$OVL/sbin/ppeinfo"
 
-# 3.1b 概览页增强：CPU 温度 / CPU 频率 / 固件编译时间三行（覆盖 luci-mod-status 主页 include）
+# 3.1b 概览页自定义系统块（覆盖 luci-mod-status 10_system.js）
 #     fork 前端靠 autocore 提供的 rpcd 扩展（luci.getTempInfo/getCPUInfo）读数，
-#     个人版不装 autocore，rpcd 方法缺失导致温度/频率行不显示。
-#     此处覆盖 10_system.js：温度/频率改用 fs.exec/fs.read 直读内核 /sys 节点
-#     注意：本 fork 的 LuCI fs.js 没有 listdir() 方法，必须用 fs.exec 走 rpcd
-#     执行 shell 读取 thermal zone（fs.read/fs.exec 各版本 LuCI 均有）
-#     （CONFIG_AIROHA_THERMAL 与 CPUFREQ 内核侧均已开启，数据源现成），
-#     保留 fork 原有 rpcd 逻辑作为优先数据源，另新增固件编译时间行（编译时注入）。
+#     个人版不装 autocore，rpcd 方法缺失导致频率行不显示。
+#     覆盖 10_system.js：频率改用 fs.exec/fs.read 直读（fs.exec 各版本 LuCI 均有）；
+#     新增 PPE 行（硬件转发引擎 FOE 表占用，读 /sys/kernel/debug/ppe/entries）；
+#     新增固件编译时间行（编译时注入）；温度行按需求整体移除——上游原版 JS 的
+#     温度行（getTempInfo）与架构行末尾温度重复显示，现架构行仅保留频率。
+#     缺失数据（无编译时间/频率读不到/PPE debugfs 不可读）的行动态隐藏，不显示 ?。
 BUILD_TIME="$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M')"
 mkdir -p "$OVL/www/luci-static/resources/view/status/include"
 cat > "$OVL/www/luci-static/resources/view/status/include/10_system.js" <<'JSEOF'
@@ -353,11 +354,6 @@ var callCPUUsage = rpc.declare({
 	method: 'getCPUUsage'
 });
 
-var callTempInfo = rpc.declare({
-	object: 'luci',
-	method: 'getTempInfo'
-});
-
 var FW_BUILD_TIME = '__BUILD_TIME__';
 
 return baseclass.extend({
@@ -370,16 +366,13 @@ return baseclass.extend({
 			L.resolveDefault(callCPUBench(), {}),
 			L.resolveDefault(callCPUInfo(), {}),
 			L.resolveDefault(callCPUUsage(), {}),
-			L.resolveDefault(callTempInfo(), {}),
 			L.resolveDefault(callLuciVersion(), { revision: _('unknown version'), branch: 'LuCI' }),
 			L.resolveDefault(callGetUnixtime(), 0),
-			L.resolveDefault(fs.exec('/bin/sh', ['-c',
-				'cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -n 1'
-			]), {}),
 			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_cur_freq'), ''),
 			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq'), ''),
 			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/cpu0/cpuinfo_cur_freq'), ''),
 			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/cpufreq_real 2>/dev/null']), {}),
+			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/ppeinfo 2>/dev/null']), {}),
 			uci.load('system')
 		]);
 	},
@@ -390,14 +383,13 @@ return baseclass.extend({
 		    cpubench    = data[2],
 		    cpuinfo     = data[3],
 		    cpuusage    = data[4],
-		    tempinfo    = data[5],
-		    luciversion = data[6],
-		    unixtime    = data[7],
-		    zoneTemp    = (L.isObject(data[8]) && typeof data[8].stdout == 'string') ? parseInt(data[8].stdout, 10) / 1000.0 : 0,
-		    freqk1      = parseInt(data[9], 10),
-		    freqk2      = parseInt(data[10], 10),
-		    freqk3      = parseInt(data[11], 10),
-		    freqk0      = (L.isObject(data[12]) && typeof data[12].stdout == 'string') ? parseInt(data[12].stdout, 10) : 0;
+		    luciversion = data[5],
+		    unixtime    = data[6],
+		    freqk1      = parseInt(data[7], 10),
+		    freqk2      = parseInt(data[8], 10),
+		    freqk3      = parseInt(data[9], 10),
+		    freqk0      = (L.isObject(data[10]) && typeof data[10].stdout == 'string') ? parseInt(data[10].stdout, 10) : 0,
+		    ppeRaw      = (L.isObject(data[11]) && typeof data[11].stdout == 'string') ? data[11].stdout.trim() : '';
 
 		luciversion = luciversion.branch + ' ' + luciversion.revision;
 
@@ -417,15 +409,9 @@ return baseclass.extend({
 			}).format(date);
 		}
 
-		/* CPU 温度：优先 rpcd(tempinfo)，兜底 shell 直读 thermal zone 最大值 */
-		var tempstr = tempinfo.tempinfo || null;
-
-		if (!tempstr && zoneTemp > 0 && zoneTemp < 150)
-			tempstr = '%.1f ℃'.format(zoneTemp);
-
-		/* CPU 频率：优先 /sbin/cpufreq_real（PLL 寄存器直读，真值——含 npu APP
-		   的 PLL 直写超频，cpufreq sysfs 感知不到），cpufreq sysfs 兜底，再兜
-		   底 cpuinfo 输出解析（格式 "…x 2 (1050MHz, 58.4°C)"，rpcd 产物，必有） */
+		/* CPU 频率：优先 /sbin/cpufreq_real（PLL 寄存器直读真值——含 NPU 页的
+		   PLL 直写超频，cpufreq sysfs 感知不到），sysfs 兜底，再兜底 cpuinfo
+		   输出解析（格式 "…x 2 (1050MHz)"，rpcd 产物，必有） */
 		var freqk = freqk0 || freqk1 || freqk2 || freqk3 || 0,
 		    freqstr = null;
 
@@ -438,7 +424,11 @@ return baseclass.extend({
 				freqstr = (parseInt(mf[1], 10) >= 1000) ? '%.2f GHz'.format(parseInt(mf[1], 10) / 1000) : '%d MHz'.format(mf[1]);
 		}
 
-		/* 固件编译时间：编译时注入（占位符用 indexOf 检测，避免 sed 误伤本行导致永远显示 ?） */
+		/* PPE：/sbin/ppeinfo 输出（形如 "PPE0: 1/37, PPE1: 3/43, DRAM: 0/5"，
+		   x/y = 硬件绑定中/表内总条目）；debugfs 缺失或不可读时隐藏该行 */
+		var ppestr = (ppeRaw && ppeRaw != 'unavailable') ? ppeRaw : null;
+
+		/* 固件编译时间：编译时注入（占位符用 indexOf 检测，避免 sed 误伤本行） */
 		var buildstr = (FW_BUILD_TIME && FW_BUILD_TIME.indexOf('BUILD') < 0) ? FW_BUILD_TIME : null;
 
 		var fields = [
@@ -447,10 +437,7 @@ return baseclass.extend({
 			_('Architecture'),     cpuinfo.cpuinfo || boardinfo.system,
 			_('Target Platform'),  (L.isObject(boardinfo.release) ? boardinfo.release.target : ''),
 			_('Firmware Version'), (L.isObject(boardinfo.release) ? boardinfo.release.description + ' / ' : '') + (luciversion || ''),
-			_('固件编译时间'),      buildstr,
 			_('Kernel Version'),   boardinfo.kernel,
-			_('CPU 温度'),         tempstr,
-			_('CPU 频率'),         freqstr,
 			_('Local Time'),       datestr,
 			_('Uptime'),           systeminfo.uptime ? '%t'.format(systeminfo.uptime) : null,
 			_('Load Average'),     Array.isArray(systeminfo.load) ? '%.2f, %.2f, %.2f'.format(
@@ -460,6 +447,22 @@ return baseclass.extend({
 			) : null,
 			_('CPU usage (%)'),    cpuusage.cpuusage
 		];
+
+		/* 缺失数据的行动态隐藏；编译时间紧跟固件版本，频率紧跟内核，PPE 殿后 */
+		var ins = 5;
+
+		if (buildstr) {
+			fields.splice(ins, 0, _('固件编译时间'), buildstr);
+			ins += 2;
+		}
+
+		if (freqstr) {
+			fields.splice(ins, 0, _('CPU 频率'), freqstr);
+			ins += 2;
+		}
+
+		if (ppestr)
+			fields.push(_('PPE'), ppestr);
 
 		var table = E('table', { 'class': 'table' });
 
@@ -480,6 +483,8 @@ sed -i "/^var FW_BUILD_TIME = /s|__BUILD_TIME__|$BUILD_TIME|" "$OVL/www/luci-sta
 INJECTED="$(grep -o "FW_BUILD_TIME = '[^']*'" "$OVL/www/luci-static/resources/view/status/include/10_system.js" | head -1)"
 echo "BUILD_TIME 注入结果: $INJECTED"
 echo "$INJECTED" | grep -q "FW_BUILD_TIME = '20" || { echo "::error::固件编译时间注入失败"; exit 1; }
+grep -q "ppeinfo" "$OVL/www/luci-static/resources/view/status/include/10_system.js" || {
+  echo "::error::10_system.js 缺少 PPE 数据源"; exit 1; }
 
 # 3.1c 远程访问：Tailscale 默认开机自启（首次需在 LuCI → 服务 → Tailscale 登录账号）
 cat > "$OVL/etc/uci-defaults/99-ddnsto" <<'TS'
