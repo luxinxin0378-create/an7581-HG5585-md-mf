@@ -620,30 +620,6 @@ uci -q commit firewall
 exit 0
 NPUOFF
 
-# 96-passwall-dns：PassWall 远程 DNS 预置为 8.8.8.8（规避 1.1.1.1 anycast 路由黑洞）
-#   根因（2026-11-26 设备实测）：PassWall 默认 remote_dns=1.1.1.1，生成 chinadns-ng
-#   trust-dns tcp://1.1.1.1，所有境外域名解析都依赖该可信 DNS。而本节点机房侧对
-#   Cloudflare 1.1.1.0/24 anycast 段路由黑洞（1.1.1.1 / 1.0.0.1 :443 全超时，
-#   同机房 8.8.4.4:443 正常 302）→ 可信 DNS 永远无响应 → 境外域名解析挂起，
-#   表现为「节点配置正确但没网」（国内直连不受影响）。
-#   修复：预置 8.8.8.8（实测可达）。注意 remote_dns 必须存裸 IP —— PassWall
-#   生成 chinadns-ng 配置时自动拼 tcp:// 前缀，存 'tcp://8.8.8.8' 会被二次
-#   拼接成乱码 tcp://tcp://8.8.8.8（本次踩坑实录）。
-#   仅当值为默认 1.1.1.1 / 空 / 带前缀默认值时覆盖，用户自定义 DNS 不动；
-#   uci-defaults 仅刷机后首次开机执行，之后用户手动改的值不会被回写。
-cat > "$OVL/etc/uci-defaults/96-passwall-dns" <<'PWDNS'
-#!/bin/sh
-[ -f /etc/config/passwall ] || exit 0
-cur=$(uci -q get passwall.@global[0].remote_dns)
-case "$cur" in
-  ""|"1.1.1.1"|"tcp://1.1.1.1"|"udp://1.1.1.1")
-    uci set passwall.@global[0].remote_dns='8.8.8.8'
-    uci -q commit passwall
-    ;;
-esac
-exit 0
-PWDNS
-
 # 3.35 QModem v3.2.0 rpcd 加载链修复：rpcd 分发脚本漏加载 cmds/<vendor>.sh，
 #     quectel 专属 cmd_*（型号/制造商/固件版本/温度/电压）函数不存在 →
 #     概览页 base_info 只剩 AT端口/连接状态。幂等补丁：已含加载行自动跳过。
