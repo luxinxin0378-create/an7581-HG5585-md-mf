@@ -221,26 +221,97 @@ endg
 # ---------------------------------------------------------------
 group "注入机型定制 ($MODEL)"
 OVL="$SRC/files"
-mkdir -p "$OVL/etc/uci-defaults"
+mkdir -p "$OVL/etc/uci-defaults" "$OVL/etc/config"
 
 # ---------------------------------------------------------------
-# 3.0 默认时区：中国标准时间（Asia/Shanghai UTC+8）+ 国内 NTP
-#     LuCI 时区下拉依赖 zoneinfo 数据包（seed 提供 core+asia）；
-#     时间准确是 VMess/TLS 代理握手的前提。
+# 3.0 静态配置文件化：原 uci-defaults 里的纯配置项（luci 主题语言 / 时区 /
+#     NPU 卸载 / dnsmasq 缓存）改为从源树复制包默认 config 后增量修改，
+#     以 files 覆盖进 rootfs —— 首启即终态，彻底消除 uci-defaults 并行
+#     commit race；运行时逻辑类脚本（wifi/zte-wan/lan25g/qmodem/smsf/
+#     filebrowser/downloader/ksmbd/ddnsto）仍保留 uci-defaults。
+#     每步带校验，失败即中断构建。
 # ---------------------------------------------------------------
-cat > "$OVL/etc/uci-defaults/99-timezone" <<'TZ'
-#!/bin/sh
-uci -q set system.@system[0].timezone='CST-8'
-uci -q set system.@system[0].zonename='Asia/Shanghai'
-uci -q delete system.ntp
-uci -q set system.ntp=timeserver
-uci -q set system.ntp.enabled='1'
-uci -q add_list system.ntp.server='ntp.aliyun.com'
-uci -q add_list system.ntp.server='ntp.tencent.com'
-uci -q add_list system.ntp.server='cn.pool.ntp.org'
-uci -q commit system
-exit 0
-TZ
+group "静态配置文件化（luci / system / firewall / dhcp）"
+
+# 3.0.1 LuCI：简体中文 + Argon 默认主题（替代 99-lang-theme / 30_luci-theme-argon）
+LCFG="$SRC/feeds/luci/modules/luci-base/root/etc/config/luci"
+[ -f "$LCFG" ] || { echo "::error::luci-base 默认 config 未找到"; exit 1; }
+cp "$LCFG" "$OVL/etc/config/luci"
+sed -i "s|option lang 'auto'|option lang 'zh_cn'|; s|option mediaurlbase .*|option mediaurlbase '/luci-static/argon'|" "$OVL/etc/config/luci"
+grep -q "option lang 'zh_cn'" "$OVL/etc/config/luci" && \
+grep -q "mediaurlbase '/luci-static/argon'" "$OVL/etc/config/luci" || {
+  echo "::error::luci 静态配置生成失败"; exit 1; }
+
+# 3.0.2 system：Asia/Shanghai + 国内 NTP（替代 99-timezone；hostname 固化为机型名）
+SYSF="$SRC/package/base-files/files/etc/config/system"
+[ -f "$SYSF" ] || { echo "::error::base-files 默认 system config 未找到"; exit 1; }
+python3 - "$SYSF" "$OVL/etc/config/system" "$MODEL" <<'PY'
+import re, sys
+src, dst, model = sys.argv[1], sys.argv[2], sys.argv[3]
+t = open(src).read()
+t = re.sub(r"option hostname\s+'[^']*'", "option hostname '%s'" % model, t, count=1)
+# 时区两行无条件重建：先删旧行，再插入到 config system 段首
+t = re.sub(r"\toption (timezone|zonename)\s+'[^']*'\n", "", t)
+t2, n = re.subn(r"(config system\b[^\n]*\n)",
+                lambda m: m.group(0) + "\toption timezone 'CST-8'\n\toption zonename 'Asia/Shanghai'\n",
+                t, count=1)
+if n != 1:
+    sys.exit(1)
+t2 = re.sub(r"config timeserver 'ntp'.*?(?=\nconfig |\Z)", "", t2, flags=re.S)
+t2 = t2.rstrip() + """
+
+config timeserver 'ntp'
+	option enabled '1'
+	list server 'ntp.aliyun.com'
+	list server 'ntp.tencent.com'
+	list server 'cn.pool.ntp.org'
+"""
+open(dst, "w").write(t2)
+PY
+grep -q "CST-8" "$OVL/etc/config/system" && grep -q "ntp.aliyun.com" "$OVL/etc/config/system" && \
+grep -q "option hostname '$MODEL'" "$OVL/etc/config/system" || {
+  echo "::error::system 静态配置生成失败"; exit 1; }
+
+# 3.0.3 firewall：NPU 硬件流卸载默认开启（替代 95-npu-offload）
+FWF="$(find "$SRC/package" -path '*firewall*/files/etc/config/firewall' 2>/dev/null | head -1)"
+[ -n "$FWF" ] || { echo "::error::firewall 默认 config 未找到"; exit 1; }
+cp "$FWF" "$OVL/etc/config/firewall"
+python3 - "$OVL/etc/config/firewall" <<'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+t2, n = re.subn(r"config defaults[^\n]*\n",
+                lambda m: m.group(0) + "\toption flow_offloading '1'\n\toption flow_offloading_hw '1'\n",
+                t, count=1)
+if n != 1:
+    sys.exit(1)
+open(sys.argv[1], "w").write(t2)
+PY
+[ $? -eq 0 ] || { echo "::error::firewall 静态配置生成失败"; exit 1; }
+grep -q "flow_offloading_hw '1'" "$OVL/etc/config/firewall" || {
+  echo "::error::firewall flow_offloading 校验失败"; exit 1; }
+
+# 3.0.4 dhcp：dnsmasq 缓存扩容 2000（替代 98-dns-cache）
+DHCPF="$(find "$SRC/package" -path '*dhcp*/files/etc/config/dhcp' 2>/dev/null | head -1)"
+[ -n "$DHCPF" ] || { echo "::error::dhcp 默认 config 未找到"; exit 1; }
+cp "$DHCPF" "$OVL/etc/config/dhcp"
+python3 - "$OVL/etc/config/dhcp" <<'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+t2, n = re.subn(r"config dnsmasq[^\n]*\n",
+                lambda m: m.group(0) + "\toption cachesize '2000'\n",
+                t, count=1)
+if n != 1:
+    sys.exit(1)
+open(sys.argv[1], "w").write(t2)
+PY
+[ $? -eq 0 ] || { echo "::error::dhcp 静态配置生成失败"; exit 1; }
+grep -q "cachesize '2000'" "$OVL/etc/config/dhcp" || {
+  echo "::error::dhcp cachesize 校验失败"; exit 1; }
+
+# ---------------------------------------------------------------
+# 3.0.2' 时区/NTP：已由 3.0.2 静态配置文件化（files/etc/config/system），
+#       原 99-timezone 脚本删除；开机 uci-defaults 不再涉及时区。
+# ---------------------------------------------------------------
 
 
 # 3.1 概览页频率/温度显示：LuCI 状态页通过 /sbin/cpuinfo、/sbin/tempinfo 读数。
@@ -498,10 +569,7 @@ net.ipv4.tcp_wmem = 4096 65536 16777216
 net.netfilter.nf_conntrack_max = 65536
 PROXYTUNE
 
-cat > "$OVL/etc/uci-defaults/98-dns-cache" <<'DNSCACHE'
-uci -q set dhcp.@dnsmasq[0].cachesize='2000'
-uci -q commit dhcp
-DNSCACHE
+# dnsmasq 缓存扩容 2000：已由 3.0.4 静态配置文件化（files/etc/config/dhcp）
 
 # 3.x FileBrowser 网页文件管理：开机启用，根目录指向 USB 挂载点 /mnt/
 # 访问 http://192.168.2.1:8989，首次账号 admin/admin（登录后请改密）
@@ -605,20 +673,8 @@ uci commit firewall
 exit 0
 ZTEWAN
 
-# 95-npu-offload：NPU 硬件流卸载默认开启（Airoha PPE + NPU 硬件转发）
-#   flowtable 内核支持由 kmod-nft-offload 提供（上游 airoha generic config
-#   NF_FLOW_TABLE 未编入，必须装包；NET_AIROHA_NPU=y 驱动已内置）。
-#   开启后 forward 链直连流量经 PPE/NPU 硬件转发；PassWall 代理流量在
-#   mangle/nat prerouting 即被 REDIRECT/TPROXY 到本机终结，不进 forward
-#   链，不受卸载影响。uci-defaults 仅刷机后首次开机执行，用户之后手动
-#   关闭不会被回写。
-cat > "$OVL/etc/uci-defaults/95-npu-offload" <<'NPUOFF'
-#!/bin/sh
-uci -q set firewall.@defaults[0].flow_offloading='1'
-uci -q set firewall.@defaults[0].flow_offloading_hw='1'
-uci -q commit firewall
-exit 0
-NPUOFF
+# 95-npu-offload：NPU 硬件流卸载默认开启 —— 已由 3.0.3 静态配置文件化
+#   （files/etc/config/firewall 的 defaults 段 flow_offloading / flow_offloading_hw）。
 
 # 3.35 QModem v3.2.0 rpcd 加载链修复：rpcd 分发脚本漏加载 cmds/<vendor>.sh，
 #     quectel 专属 cmd_*（型号/制造商/固件版本/温度/电压）函数不存在 →
@@ -661,29 +717,10 @@ uci commit sms_forwarder
 exit 0
 SMSF
 
-# 3.4 默认简体中文 + 默认主题 Argon（jerrykuku 官方 v3.1.4 / OP 最火主题）
-#     mac 主题已整体移除；feed argon 自带的 30- 抢默认脚本被 30_luci-theme-argon
-#     覆盖为「只注册」，默认统一由本脚本指定，杜绝并行 commit race。
-cat > "$OVL/etc/uci-defaults/99-lang-theme" <<'LANGTHEME'
-#!/bin/sh
-uci -q set luci.main.lang='zh_cn'
-uci -q set luci.main.mediaurlbase='/luci-static/argon'
-uci -q commit luci
-exit 0
-LANGTHEME
-# 3.4b 废掉 Argon 自带 uci-defaults 的「抢默认」行为（保留主题注册）
-#     根因：首启 uci-defaults 为并行后台执行（( . file ) & + wait），
-#     Argon 的迁移脚本 commit 慢、后到——它 commit 时用自己的 config
-#     快照重写 /etc/config/luci，会把其他主题注册与默认值抹掉，
-#     表现为：首启默认主题随机、主题切换下拉缺项。
-#     处理：用 files 覆盖（prepare_rootfs 在包安装后执行）把
-#     30_luci-theme-argon 替换为只注册、不设默认的空操作版本。
-cat > "$OVL/etc/uci-defaults/30_luci-theme-argon" <<'ARGONFIX'
-#!/bin/sh
-# 只注册 Argon，不设默认（默认由 99-lang-theme 统一指定）
-uci -q set luci.themes.Argon='/luci-static/argon'
-exit 0
-ARGONFIX
+# 3.4 默认简体中文 + 默认主题 Argon —— 已由 3.0.1 静态配置文件化
+#     （files/etc/config/luci，首启即终态）；Argon 包自带 30- 迁移脚本
+#     的写入值与静态文件一致（mediaurlbase=argon），即使后 commit 也幂等，
+#     原 99-lang-theme / 30_luci-theme-argon 两个脚本删除，race 根除。
 chmod +x "$OVL/etc/uci-defaults/"*
 endg
 
