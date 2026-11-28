@@ -437,7 +437,9 @@ return baseclass.extend({
 			_('Architecture'),     cpuinfo.cpuinfo || boardinfo.system,
 			_('Target Platform'),  (L.isObject(boardinfo.release) ? boardinfo.release.target : ''),
 			_('Firmware Version'), (L.isObject(boardinfo.release) ? boardinfo.release.description + ' / ' : '') + (luciversion || ''),
+			(buildstr != null) ? _('固件编译时间') : null, buildstr,
 			_('Kernel Version'),   boardinfo.kernel,
+			(freqstr != null) ? _('CPU 频率') : null, freqstr,
 			_('Local Time'),       datestr,
 			_('Uptime'),           systeminfo.uptime ? '%t'.format(systeminfo.uptime) : null,
 			_('Load Average'),     Array.isArray(systeminfo.load) ? '%.2f, %.2f, %.2f'.format(
@@ -445,31 +447,23 @@ return baseclass.extend({
 				systeminfo.load[1] / 65535.0,
 				systeminfo.load[2] / 65535.0
 			) : null,
-			_('CPU usage (%)'),    cpuusage.cpuusage
+			_('CPU usage (%)'),    cpuusage.cpuusage,
+			(ppestr != null) ? _('PPE') : null, ppestr
 		];
 
-		/* 缺失数据的行动态隐藏；编译时间紧跟固件版本，频率紧跟内核，PPE 殿后 */
-		var ins = 5;
-
-		if (buildstr) {
-			fields.splice(ins, 0, _('固件编译时间'), buildstr);
-			ins += 2;
-		}
-
-		if (freqstr) {
-			fields.splice(ins, 0, _('CPU 频率'), freqstr);
-			ins += 2;
-		}
-
-		if (ppestr)
-			fields.push(_('PPE'), ppestr);
-
+		/* 行序靠 fields 内联顺序保证（编译时间紧跟固件版本、频率紧跟内核、
+		   PPE 殿后），不用 splice——splice 落在奇数位会把 label/value 配对
+		   劈开导致整表错位（2026-11-28 修复）；渲染时 value 为 null 的行
+		   整行隐藏（缺失数据不显示 ?） */
 		var table = E('table', { 'class': 'table' });
 
 		for (var i = 0; i < fields.length; i += 2) {
+			if (fields[i + 1] == null)
+				continue;
+
 			table.appendChild(E('tr', { 'class': 'tr' }, [
 				E('td', { 'class': 'td left', 'width': '33%' }, [ fields[i] ]),
-				E('td', { 'class': 'td left' }, [ (fields[i + 1] != null) ? fields[i + 1] : '?' ])
+				E('td', { 'class': 'td left' }, [ fields[i + 1] ])
 			]));
 		}
 
