@@ -262,13 +262,192 @@ grep -q "flow_offloading_hw" "$OVL/etc/config/firewall" || {
 # ---------------------------------------------------------------
 
 
-# 3.4 概览页频率/温度显示：LuCI 状态页通过 /sbin/cpuinfo、/sbin/tempinfo 读数。
-#     autocore 只在 ipq*/mediatek*/qualcommax* 安装这两个脚本，airoha 不在其列，
-#     因此直接从本仓库 overlay 注入，不引入 autocore 包、不改 .config。
-mkdir -p "$OVL/sbin"
+# 3.4 概览页数据脚本 + 自定义系统块（覆盖 luci-mod-status 10_system.js）
+#     数据脚本：cpuinfo（架构+频率，rpcd getCPUInfo）/ cpufreq_real（PLL 直读）/
+#     ppeinfo（PPE FOE 表占用）。tempinfo 已随温度行移除（2026-11-28）——
+#     上游原版 JS 的温度行与架构行末尾温度重复显示，现自定义 JS 不再显示温度。
+#     新增：PPE 行（硬件转发引擎表占用）、CPU 频率行、固件编译时间行（注入）；
+#     缺失数据的行动态隐藏，不显示 ?。与个人版 3.1b 同款。
+mkdir -p "$OVL/sbin" "$OVL/www/luci-static/resources/view/status/include"
 install -m 0755 "$REPO/config/overlay/sbin/cpuinfo"      "$OVL/sbin/cpuinfo"
-install -m 0755 "$REPO/config/overlay/sbin/tempinfo"     "$OVL/sbin/tempinfo"
 install -m 0755 "$REPO/config/overlay/sbin/cpufreq_real" "$OVL/sbin/cpufreq_real"
+install -m 0755 "$REPO/config/overlay/sbin/ppeinfo"      "$OVL/sbin/ppeinfo"
+
+BUILD_TIME="$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M')"
+cat > "$OVL/www/luci-static/resources/view/status/include/10_system.js" <<'JSEOF'
+'use strict';
+'require baseclass';
+'require fs';
+'require rpc';
+'require uci';
+
+var callGetUnixtime = rpc.declare({
+	object: 'luci',
+	method: 'getUnixtime',
+	expect: { result: 0 }
+});
+
+var callLuciVersion = rpc.declare({
+	object: 'luci',
+	method: 'getVersion'
+});
+
+var callSystemBoard = rpc.declare({
+	object: 'system',
+	method: 'board'
+});
+
+var callSystemInfo = rpc.declare({
+	object: 'system',
+	method: 'info'
+});
+
+var callCPUBench = rpc.declare({
+	object: 'luci',
+	method: 'getCPUBench'
+});
+
+var callCPUInfo = rpc.declare({
+	object: 'luci',
+	method: 'getCPUInfo'
+});
+
+var callCPUUsage = rpc.declare({
+	object: 'luci',
+	method: 'getCPUUsage'
+});
+
+var FW_BUILD_TIME = '__BUILD_TIME__';
+
+return baseclass.extend({
+	title: _('System'),
+
+	load: function() {
+		return Promise.all([
+			L.resolveDefault(callSystemBoard(), {}),
+			L.resolveDefault(callSystemInfo(), {}),
+			L.resolveDefault(callCPUBench(), {}),
+			L.resolveDefault(callCPUInfo(), {}),
+			L.resolveDefault(callCPUUsage(), {}),
+			L.resolveDefault(callLuciVersion(), { revision: _('unknown version'), branch: 'LuCI' }),
+			L.resolveDefault(callGetUnixtime(), 0),
+			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_cur_freq'), ''),
+			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq'), ''),
+			L.resolveDefault(fs.read('/sys/devices/system/cpu/cpufreq/cpu0/cpuinfo_cur_freq'), ''),
+			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/cpufreq_real 2>/dev/null']), {}),
+			L.resolveDefault(fs.exec('/bin/sh', ['-c', '/sbin/ppeinfo 2>/dev/null']), {}),
+			uci.load('system')
+		]);
+	},
+
+	render: function(data) {
+		var boardinfo   = data[0],
+		    systeminfo  = data[1],
+		    cpubench    = data[2],
+		    cpuinfo     = data[3],
+		    cpuusage    = data[4],
+		    luciversion = data[5],
+		    unixtime    = data[6],
+		    freqk1      = parseInt(data[7], 10),
+		    freqk2      = parseInt(data[8], 10),
+		    freqk3      = parseInt(data[9], 10),
+		    freqk0      = (L.isObject(data[10]) && typeof data[10].stdout == 'string') ? parseInt(data[10].stdout, 10) : 0,
+		    ppeRaw      = (L.isObject(data[11]) && typeof data[11].stdout == 'string') ? data[11].stdout.trim() : '';
+
+		luciversion = luciversion.branch + ' ' + luciversion.revision;
+
+		var datestr = null;
+
+		if (unixtime) {
+			var date = new Date(unixtime * 1000),
+				zn = uci.get('system', '@system[0]', 'zonename')?.replaceAll(' ', '_') || 'UTC',
+				ts = uci.get('system', '@system[0]', 'clock_timestyle') || 0,
+				hc = uci.get('system', '@system[0]', 'clock_hourcycle') || 0;
+
+			datestr = new Intl.DateTimeFormat(undefined, {
+				dateStyle: 'medium',
+				timeStyle: (ts == 0) ? 'long' : 'full',
+				hourCycle: (hc == 0) ? undefined : hc,
+				timeZone: zn
+			}).format(date);
+		}
+
+		/* CPU 频率：优先 /sbin/cpufreq_real（PLL 寄存器直读真值——含 NPU 页的
+		   PLL 直写超频，cpufreq sysfs 感知不到），sysfs 兜底，再兜底 cpuinfo
+		   输出解析（格式 "…x 4 (1300MHz)"，rpcd 产物，必有） */
+		var freqk = freqk0 || freqk1 || freqk2 || freqk3 || 0,
+		    freqstr = null;
+
+		if (freqk > 0) {
+			freqstr = (freqk >= 1000000) ? '%.2f GHz'.format(freqk / 1000000) : '%d MHz'.format(Math.round(freqk / 1000));
+		} else {
+			var mf = (typeof cpuinfo.cpuinfo == 'string' ? cpuinfo.cpuinfo : '').match(/\((\d+)\s*MHz/);
+
+			if (mf && parseInt(mf[1], 10) > 0)
+				freqstr = (parseInt(mf[1], 10) >= 1000) ? '%.2f GHz'.format(parseInt(mf[1], 10) / 1000) : '%d MHz'.format(mf[1]);
+		}
+
+		/* PPE：/sbin/ppeinfo 输出（形如 "PPE0: 1/37, PPE1: 3/43, DRAM: 0/5"，
+		   x/y = 硬件绑定中/表内总条目）；debugfs 缺失或不可读时隐藏该行 */
+		var ppestr = (ppeRaw && ppeRaw != 'unavailable') ? ppeRaw : null;
+
+		/* 固件编译时间：编译时注入（占位符用 indexOf 检测，避免 sed 误伤本行） */
+		var buildstr = (FW_BUILD_TIME && FW_BUILD_TIME.indexOf('BUILD') < 0) ? FW_BUILD_TIME : null;
+
+		var fields = [
+			_('Hostname'),         boardinfo.hostname,
+			_('Model'),            boardinfo.model + cpubench.cpubench,
+			_('Architecture'),     cpuinfo.cpuinfo || boardinfo.system,
+			_('Target Platform'),  (L.isObject(boardinfo.release) ? boardinfo.release.target : ''),
+			_('Firmware Version'), (L.isObject(boardinfo.release) ? boardinfo.release.description + ' / ' : '') + (luciversion || ''),
+			_('Kernel Version'),   boardinfo.kernel,
+			_('Local Time'),       datestr,
+			_('Uptime'),           systeminfo.uptime ? '%t'.format(systeminfo.uptime) : null,
+			_('Load Average'),     Array.isArray(systeminfo.load) ? '%.2f, %.2f, %.2f'.format(
+				systeminfo.load[0] / 65535.0,
+				systeminfo.load[1] / 65535.0,
+				systeminfo.load[2] / 65535.0
+			) : null,
+			_('CPU usage (%)'),    cpuusage.cpuusage
+		];
+
+		/* 缺失数据的行动态隐藏；编译时间紧跟固件版本，频率紧跟内核，PPE 殿后 */
+		var ins = 5;
+
+		if (buildstr) {
+			fields.splice(ins, 0, _('固件编译时间'), buildstr);
+			ins += 2;
+		}
+
+		if (freqstr) {
+			fields.splice(ins, 0, _('CPU 频率'), freqstr);
+			ins += 2;
+		}
+
+		if (ppestr)
+			fields.push(_('PPE'), ppestr);
+
+		var table = E('table', { 'class': 'table' });
+
+		for (var i = 0; i < fields.length; i += 2) {
+			table.appendChild(E('tr', { 'class': 'tr' }, [
+				E('td', { 'class': 'td left', 'width': '33%' }, [ fields[i] ]),
+				E('td', { 'class': 'td left' }, [ (fields[i + 1] != null) ? fields[i + 1] : '?' ])
+			]));
+		}
+
+		return table;
+	}
+});
+JSEOF
+# 只替换定义行（^var FW_BUILD_TIME），避免误伤其他引用占位符的逻辑行
+sed -i "/^var FW_BUILD_TIME = /s|__BUILD_TIME__|$BUILD_TIME|" "$OVL/www/luci-static/resources/view/status/include/10_system.js"
+# 自检：构建日志打印注入结果，未替换或仍含占位符则报错
+INJECTED="$(grep -o "FW_BUILD_TIME = '[^']*'" "$OVL/www/luci-static/resources/view/status/include/10_system.js" | head -1)"
+echo "BUILD_TIME 注入结果: $INJECTED"
+echo "$INJECTED" | grep -q "FW_BUILD_TIME = '20" || { echo "::error::固件编译时间注入失败"; exit 1; }
+grep -q "ppeinfo" "$OVL/www/luci-static/resources/view/status/include/10_system.js" || {
+  echo "::error::10_system.js 缺少 PPE 数据源"; exit 1; }
 
 # 3.5 网络转发调优（PPE 未生效，转发全靠 CPU，这里榨多核）
 #     RPS：把网卡 RX 软中断从 CPU0 分散到 CPU1-3；RFS 按 socket 流建哈希。
