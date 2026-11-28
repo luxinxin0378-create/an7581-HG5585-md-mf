@@ -1,0 +1,40 @@
+#!/bin/sh
+# LuCI 概览页「PPE」数据源：统计 Airoha PPE（硬件转发引擎）FOE 表占用
+# debugfs: /sys/kernel/debug/ppe/entries —— 每行 "<hex idx> <BND|UNB|FIN|INV> <type> ..."
+#   条目索引切片: 0-8191 → PPE0，8192-16383 → PPE1（仅 AN7581 双引擎 SoC），≥16384 → 共享 DRAM
+# 输出形如：PPE0: 1/37, PPE1: 3/43, DRAM: 0/5   （x/y = 绑定中/总条目，空切片不显示）
+# debugfs 缺失或不可读时输出 "unavailable"，前端隐藏该行
+ENT="/sys/kernel/debug/ppe/entries"
+[ -r "$ENT" ] || { printf '%s' "unavailable"; exit 0; }
+
+awk '
+function hexval(s,    i, c, d, n) {
+	n = 0
+	for (i = 1; i <= length(s); i++) {
+		c = tolower(substr(s, i, 1))
+		d = index("0123456789abcdef", c) - 1
+		if (d < 0) return -1
+		n = n * 16 + d
+	}
+	return n
+}
+$1 ~ /^[0-9a-fA-F]+$/ && $2 ~ /^(BND|UNB|FIN|INV)$/ {
+	idx = hexval($1)
+	if (idx < 0) next
+	if (idx < 8192)      { p0t++; if ($2 == "BND") p0b++ }
+	else if (idx < 16384) { p1t++; if ($2 == "BND") p1b++ }
+	else                  { dt++;  if ($2 == "BND") db++  }
+}
+END {
+	out = ""
+	if (p0t > 0 || p1t > 0 || dt > 0) {
+		if (p0t > 0) out = out (out == "" ? "" : ", ") "PPE0: " p0b "/" p0t
+		if (p1t > 0) out = out (out == "" ? "" : ", ") "PPE1: " p1b "/" p1t
+		if (dt > 0)  out = out (out == "" ? "" : ", ") "DRAM: " db "/" dt
+	} else {
+		# 表完全为空：报告引擎可用但无条目（NPU 加速开启后一旦有硬件转发流即出现）
+		out = "PPE0: 0/0"
+	}
+	printf "%s", out
+}
+' "$ENT"
